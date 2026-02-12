@@ -1,18 +1,35 @@
 # Darkroot Production Deployment Guide
 
+**Status**: Deployed to VPS (2026-02-12)
+**URL**: `http://chat.warrenmcgrail.com` (pending DNS + SSL)
+**VPS IP**: `15.204.89.177`
+
+## Architecture (Production)
+
+The VPS uses the **host nginx** (not a Docker nginx container) for SSL termination and static file serving:
+
+```
+Internet → Host nginx (80/443) → Static files at /opt/darkroot/client/build/
+                                → Proxy /_matrix/* to localhost:8008 (Synapse container)
+                                → Proxy /_synapse/* to localhost:8008 (Admin API)
+```
+
+Docker services: PostgreSQL, Redis, Synapse (exposed on `127.0.0.1:8008` only)
+Nginx config: `/etc/nginx/sites-enabled/chat.warrenmcgrail.com`
+Frontend: `/opt/darkroot/client/build/` (SvelteKit static SPA)
+
 ## Prerequisites
 
-1. **VPS Access** via lordran-home jumpbox
+1. **VPS Access** — direct SSH or via lordran-home jumpbox
    ```bash
-   ssh lordran-home "ssh vps 'echo Connected'"
+   ssh vps 'echo Connected'
    ```
 
 2. **Domain DNS** pointed to VPS IP
-   - `chat.warrenmcgrail.com` → VPS IP address
+   - `chat.warrenmcgrail.com` → `15.204.89.177`
 
 3. **Environment File** configured on VPS
-   - Copy `.env.example` to `.env.prod`
-   - Update all production values (passwords, domain, etc.)
+   - `.env.prod` at `/opt/darkroot/.env.prod`
 
 ## Initial Setup (One-Time)
 

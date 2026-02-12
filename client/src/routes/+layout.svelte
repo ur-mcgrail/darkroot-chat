@@ -9,6 +9,13 @@
 	let loading = true;
 	let error = '';
 
+	// Public routes that don't require authentication
+	const PUBLIC_ROUTES = ['/login', '/register'];
+
+	function isPublicRoute(pathname: string): boolean {
+		return PUBLIC_ROUTES.some((route) => pathname === route || pathname.startsWith(route + '/'));
+	}
+
 	onMount(async () => {
 		try {
 			// Attempt to restore session from localStorage
@@ -16,21 +23,21 @@
 
 			if (restored) {
 				console.log('Session restored successfully');
-				// Redirect to main app if on login page
-				if ($page.url.pathname === '/login') {
+				// Redirect to main app if on login/register page
+				if (isPublicRoute($page.url.pathname)) {
 					await goto('/');
 				}
 			} else {
-				// No session found, redirect to login if not already there
-				if ($page.url.pathname !== '/login') {
+				// No session found, redirect to login if not on a public route
+				if (!isPublicRoute($page.url.pathname)) {
 					await goto('/login');
 				}
 			}
 		} catch (err) {
 			console.error('Session restoration error:', err);
 			error = 'Failed to restore session';
-			// Redirect to login on error
-			if ($page.url.pathname !== '/login') {
+			// Redirect to login on error (unless on a public route)
+			if (!isPublicRoute($page.url.pathname)) {
 				await goto('/login');
 			}
 		} finally {
@@ -39,7 +46,7 @@
 	});
 
 	// Reactive redirect if user logs out
-	$: if (!loading && !$isLoggedIn && $page.url.pathname !== '/login') {
+	$: if (!loading && !$isLoggedIn && !isPublicRoute($page.url.pathname)) {
 		goto('/login');
 	}
 </script>

@@ -1,6 +1,8 @@
 # Darkroot - Development Guide
 
-**Status**: Phase 4 Complete ✅ - **PRODUCTION READY!** 🎉
+**Status**: Phase 4 Complete ✅ - Production deployed! 🎉
+**Live**: `http://chat.warrenmcgrail.com` (pending DNS A record)
+**Dev**: `http://192.168.1.161:5175`
 
 ## Current Features
 
@@ -220,14 +222,34 @@ client/src/
 └── app.css                    # Global styles, Lordran UI imports
 ```
 
-## Next Steps (Phase 4)
+## Invite Link Flow
 
-**Polish & Production:**
+**How token-based invites work (no email system needed):**
+
+1. Admin opens Admin Panel (gear icon in top bar)
+2. Clicks "Generate Invite Link" (creates token: 5 uses, 7-day expiry)
+3. Link auto-copied to clipboard: `https://chat.warrenmcgrail.com/register?token=ABC123`
+4. Share link via text, DM, etc.
+5. New user clicks link → sees "Welcome to the Forest" page
+6. User picks username + password → account created → auto-login → chat
+
+**Two registration modes:**
+- **Invite link** (`/register?token=...`): Token pre-filled, hidden from UI, welcoming messaging
+- **Manual token** (`/register`): User must paste token into a visible field
+
+**Key files:**
+- `lib/matrix/admin.ts` — Token CRUD via Synapse Admin API
+- `lib/components/AdminPanel.svelte` — Token management UI
+- `routes/register/+page.svelte` — Registration page (both modes)
+- `routes/+layout.svelte` — Auth guard with public route allowlist
+
+## Next Steps
+
+**Remaining polish:**
+- [ ] DNS A record for `chat.warrenmcgrail.com → 15.204.89.177`
+- [ ] SSL via `sudo certbot --nginx -d chat.warrenmcgrail.com` on VPS
+- [ ] Update env.js to `https://` after SSL
 - [ ] PWA configuration (manifest, service worker, offline)
-- [ ] Room creation UI (+ button functionality)
 - [ ] User settings and profile editing
 - [ ] Desktop notifications
-- [ ] Production deployment to VPS (chat.warrenmcgrail.com)
-- [ ] Docker production compose
-- [ ] Nginx reverse proxy + SSL/TLS
 - [ ] Backup strategy

@@ -109,7 +109,7 @@ export async function joinRoom(roomIdOrAlias: string): Promise<sdk.Room> {
 }
 
 /**
- * Create a new room
+ * Create a new room (public by default so all server users can find & join)
  */
 export async function createRoom(name: string, topic?: string): Promise<sdk.Room> {
 	const client = get(matrixClient);
@@ -118,11 +118,37 @@ export async function createRoom(name: string, topic?: string): Promise<sdk.Room
 	const result = await client.createRoom({
 		name,
 		topic,
-		visibility: 'private' as sdk.Visibility,
-		preset: 'trusted_private_chat' as sdk.Preset,
+		visibility: 'public' as sdk.Visibility,
+		preset: 'public_chat' as sdk.Preset,
+		initial_state: [
+			{
+				type: 'm.room.history_visibility',
+				state_key: '',
+				content: { history_visibility: 'shared' },
+			},
+		],
 	});
 
 	return client.getRoom(result.room_id)!;
+}
+
+/**
+ * List public rooms on the server (room directory)
+ */
+export async function listPublicRooms(): Promise<{ roomId: string; name: string; topic: string; numMembers: number; avatarUrl: string | null }[]> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+
+	const response = await client.publicRooms({});
+	const chunk = response.chunk || [];
+
+	return chunk.map((room: any) => ({
+		roomId: room.room_id,
+		name: room.name || 'Unnamed Room',
+		topic: room.topic || '',
+		numMembers: room.num_joined_members || 0,
+		avatarUrl: room.avatar_url || null,
+	}));
 }
 
 /**

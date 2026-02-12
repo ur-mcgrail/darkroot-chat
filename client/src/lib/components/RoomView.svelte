@@ -4,10 +4,16 @@
 	import { getRoomName } from '$lib/matrix/rooms';
 	import { fetchRoomMessages, sendMessage } from '$lib/matrix/messages';
 	import MessageList from './MessageList.svelte';
+	import LinkSidebar from './LinkSidebar.svelte';
 
 	let messageText = '';
 	let sending = false;
 	let textareaElement: HTMLTextAreaElement;
+	let showLinkSidebar = true;
+	let showXWarning = false;
+
+	// X / Twitter link detection
+	const X_LINK_REGEX = /https?:\/\/(www\.)?(twitter\.com|x\.com)\/[^\s]+/i;
 
 	$: roomName = $currentRoom ? getRoomName($currentRoom) : '';
 	$: memberCount = $currentRoom ? $currentRoom.getJoinedMemberCount() : 0;
@@ -25,27 +31,43 @@
 		}
 	}
 
-	async function handleSendMessage() {
-		if (!$currentRoomId || !messageText.trim() || sending) {
-			return;
-		}
+	/** Actually send the message (no checks) */
+	async function doSend() {
+		if (!$currentRoomId || !messageText.trim() || sending) return;
 
 		sending = true;
-
 		try {
 			await sendMessage($currentRoomId, messageText);
-			messageText = ''; // Clear input
-
-			// Reset textarea height
-			if (textareaElement) {
-				textareaElement.style.height = 'auto';
-			}
+			messageText = '';
+			if (textareaElement) textareaElement.style.height = 'auto';
 		} catch (error) {
 			console.error('Failed to send message:', error);
 			alert('Failed to send message. Please try again.');
 		} finally {
 			sending = false;
 		}
+	}
+
+	/** Intercept send — check for X/Twitter links first */
+	async function handleSendMessage() {
+		if (!$currentRoomId || !messageText.trim() || sending) return;
+
+		if (X_LINK_REGEX.test(messageText)) {
+			showXWarning = true;
+			return;
+		}
+
+		await doSend();
+	}
+
+	function confirmXSend() {
+		showXWarning = false;
+		doSend();
+	}
+
+	function cancelXSend() {
+		showXWarning = false;
+		// Leave the message in the textarea so they can edit it
 	}
 
 	function handleKeyDown(event: KeyboardEvent) {
@@ -78,7 +100,7 @@
 
 <div class="room-view">
 	{#if $currentRoom}
-		<!-- Room Header -->
+		<!-- Room Header (spans full width including sidebar) -->
 		<div class="room-header">
 			<div class="room-header__info">
 				<div class="room-header__avatar">
@@ -91,44 +113,57 @@
 					</p>
 				</div>
 			</div>
-		</div>
-
-		<!-- Message List -->
-		<MessageList />
-
-		<!-- Message Input -->
-		<div class="message-input">
-			<textarea
-				bind:this={textareaElement}
-				bind:value={messageText}
-				on:keydown={handleKeyDown}
-				on:input={handleInput}
-				class="message-input__textarea"
-				placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
-				disabled={sending}
-				rows="1"
-			></textarea>
-			<div class="message-input__actions">
-				<div class="message-input__tools">
-					<!-- File upload button (placeholder for now) -->
-					<!-- <label class="file-upload-button">
-						<input
-							type="file"
-							on:change={handleFileUpload}
-							accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
-							style="display: none;"
-						/>
-						📎
-					</label> -->
-				</div>
+			<div class="room-header__actions">
 				<button
-					class="message-input__send-button"
-					on:click={handleSendMessage}
-					disabled={sending || !messageText.trim()}
+					class="room-header__toggle-links"
+					class:active={showLinkSidebar}
+					on:click={() => showLinkSidebar = !showLinkSidebar}
+					title={showLinkSidebar ? 'Hide links panel' : 'Show links panel'}
 				>
-					{sending ? 'Sending...' : 'Send'}
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+						<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+					</svg>
 				</button>
 			</div>
+		</div>
+
+		<!-- Chat body + Link sidebar -->
+		<div class="room-body">
+			<!-- Main chat column -->
+			<div class="room-body__chat">
+				<!-- Message List -->
+				<MessageList />
+
+				<!-- Message Input -->
+				<div class="message-input">
+					<textarea
+						bind:this={textareaElement}
+						bind:value={messageText}
+						on:keydown={handleKeyDown}
+						on:input={handleInput}
+						class="message-input__textarea"
+						placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+						disabled={sending}
+						rows="1"
+					></textarea>
+					<div class="message-input__actions">
+						<div class="message-input__tools">
+							<!-- File upload button (placeholder for now) -->
+						</div>
+						<button
+							class="message-input__send-button"
+							on:click={handleSendMessage}
+							disabled={sending || !messageText.trim()}
+						>
+							{sending ? 'Sending...' : 'Send'}
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- Link Sidebar -->
+			<LinkSidebar visible={showLinkSidebar} />
 		</div>
 	{:else}
 		<!-- No Room Selected -->
@@ -142,6 +177,30 @@
 			</div>
 		</div>
 	{/if}
+
+	<!-- X / Twitter Warning Modal -->
+	{#if showXWarning}
+		<div class="x-warn-overlay" on:click|self={cancelXSend}>
+			<div class="x-warn-modal">
+				<div class="x-warn-icon">
+					<span>𝕏</span>
+				</div>
+				<h3 class="x-warn-title">Hold up.</h3>
+				<p class="x-warn-message">
+					You are attempting to share a link from <strong>x.com</strong> &mdash;
+					that platform is full of racists. Please think twice before posting this.
+				</p>
+				<div class="x-warn-actions">
+					<button class="x-warn-cancel" on:click={cancelXSend}>
+						Nevermind
+					</button>
+					<button class="x-warn-confirm" on:click={confirmXSend}>
+						Send Anyway
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -151,6 +210,7 @@
 		flex: 1;
 		height: 100%;
 		background: var(--bg-base);
+		overflow: hidden;
 	}
 
 	/* Room Header */
@@ -199,6 +259,52 @@
 		margin: 2px 0 0 0;
 		font-size: var(--text-xs);
 		color: var(--text-muted);
+	}
+
+	.room-header__actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.room-header__toggle-links {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-2);
+		background: transparent;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-sm);
+		color: var(--text-muted);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.room-header__toggle-links:hover {
+		background: var(--bg-hover);
+		color: var(--text-secondary);
+		border-color: var(--accent-primary);
+	}
+
+	.room-header__toggle-links.active {
+		background: var(--accent-primary-dim);
+		color: var(--accent-primary-bright);
+		border-color: var(--accent-primary);
+	}
+
+	/* Room body: chat + sidebar */
+	.room-body {
+		display: flex;
+		flex: 1;
+		overflow: hidden;
+	}
+
+	.room-body__chat {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-width: 0; /* allow shrinking */
+		overflow: hidden;
 	}
 
 	/* Message Input */
@@ -305,5 +411,113 @@
 		color: var(--text-muted);
 		font-size: var(--text-sm);
 		font-style: italic;
+	}
+
+	/* ── X / Twitter Warning Modal ── */
+	.x-warn-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.7);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 9999;
+		backdrop-filter: blur(4px);
+		animation: fadeIn 0.15s ease-out;
+	}
+
+	.x-warn-modal {
+		background: var(--bg-elevated);
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-lg);
+		padding: var(--space-6);
+		max-width: 420px;
+		width: 90%;
+		text-align: center;
+		box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+		animation: slideUp 0.2s ease-out;
+	}
+
+	.x-warn-icon {
+		width: 56px;
+		height: 56px;
+		margin: 0 auto var(--space-4) auto;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #1a1a2e;
+		border: 2px solid #e74c3c;
+		border-radius: var(--radius-full);
+		font-size: 28px;
+		color: #fff;
+	}
+
+	.x-warn-title {
+		margin: 0 0 var(--space-3) 0;
+		font-size: var(--text-xl);
+		font-weight: 700;
+		color: #e74c3c;
+		font-family: var(--font-display);
+	}
+
+	.x-warn-message {
+		margin: 0 0 var(--space-5) 0;
+		font-size: var(--text-sm);
+		color: var(--text-secondary);
+		line-height: 1.7;
+	}
+
+	.x-warn-message strong {
+		color: var(--text-primary);
+	}
+
+	.x-warn-actions {
+		display: flex;
+		gap: var(--space-3);
+		justify-content: center;
+	}
+
+	.x-warn-cancel {
+		padding: var(--space-3) var(--space-5);
+		background: var(--accent-primary);
+		border: 1px solid var(--accent-primary-bright);
+		border-radius: var(--radius-md);
+		color: var(--text-primary);
+		font-weight: 600;
+		font-size: var(--text-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.x-warn-cancel:hover {
+		background: var(--accent-primary-bright);
+		box-shadow: var(--shadow-glow-green);
+	}
+
+	.x-warn-confirm {
+		padding: var(--space-3) var(--space-5);
+		background: transparent;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		color: var(--text-muted);
+		font-weight: 500;
+		font-size: var(--text-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.x-warn-confirm:hover {
+		border-color: #e74c3c;
+		color: #e74c3c;
+	}
+
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	@keyframes slideUp {
+		from { transform: translateY(20px); opacity: 0; }
+		to { transform: translateY(0); opacity: 1; }
 	}
 </style>

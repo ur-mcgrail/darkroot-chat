@@ -128,7 +128,7 @@
 		<!-- Footer -->
 		<div class="login-footer">
 			<p class="login-hint">
-				Default: <code>admin</code> / <code>darkroot_admin_2026</code>
+				Have an invite link? <a href="/register" class="register-link">Create an account</a>
 			</p>
 		</div>
 	</div>
@@ -245,15 +245,22 @@
 
 	.login-hint {
 		margin: 0;
+		margin-bottom: var(--space-2);
 		font-size: var(--text-xs);
 		color: var(--text-muted);
 	}
 
-	.login-hint code {
-		padding: 2px 6px;
-		background: var(--bg-base);
-		border-radius: var(--radius-xs);
-		font-family: var(--font-mono);
+	.login-hint:last-child {
+		margin-bottom: 0;
+	}
+
+	.register-link {
 		color: var(--accent-primary-bright);
+		text-decoration: underline;
+		transition: color var(--transition-fast);
+	}
+
+	.register-link:hover {
+		color: var(--accent-gold);
 	}
 </style>

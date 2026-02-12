@@ -3,6 +3,7 @@
 	import { messages, matrixClient } from '$lib/stores/matrix';
 	import { marked } from 'marked';
 	import { getMessageBody, getMessageType, isOwnMessage } from '$lib/matrix/messages';
+	import { hasServiceLink, getContextText, extractAllServiceLinks, URL_REGEX } from '$lib/utils/links';
 
 	let messageContainer: HTMLDivElement;
 	let shouldAutoScroll = true;
@@ -12,6 +13,26 @@
 		breaks: true, // Convert \n to <br>
 		gfm: true, // GitHub Flavored Markdown
 	});
+
+	/**
+	 * For messages with service links, strip the URLs out and append a
+	 * "See Link Feed →" badge. Otherwise render normally.
+	 */
+	function renderBody(body: string, isLink: boolean): string {
+		if (!isLink) return marked.parse(body) as string;
+
+		// Get the text around the link(s)
+		const context = getContextText(body);
+		const links = extractAllServiceLinks(body);
+		const icons = links.map((l) => l.service.icon).join(' ');
+
+		let html = '';
+		if (context) {
+			html += marked.parse(context) as string;
+		}
+		html += `<span class="link-feed-badge">${icons} See Link Feed →</span>`;
+		return html;
+	}
 
 	// Auto-scroll to bottom when messages change
 	afterUpdate(() => {
@@ -86,16 +107,19 @@
 			<p class="empty-hint">Be the first to send a message!</p>
 		</div>
 	{:else}
-		{#each $messages as message (message.id)}
+		{#each $messages as message, i (message.id)}
 			{@const isOwn = $matrixClient && isOwnMessage(message.sender, $matrixClient)}
 			{@const messageType = getMessageType(message.content)}
 			{@const body = getMessageBody(message.content)}
+			{@const isLink = messageType === 'm.text' && hasServiceLink(body)}
+			{@const prevMessage = i > 0 ? $messages[i - 1] : null}
+			{@const sameSenderAsPrev = prevMessage && prevMessage.sender === message.sender}
 
-			<div class="message-wrapper" class:own={isOwn}>
+			<div class="message-wrapper" class:own={isOwn} class:grouped={sameSenderAsPrev}>
 				<div class="chat-bubble" class:sent={isOwn} class:received={!isOwn}>
-					<!-- Sender name (only for received messages) -->
-					{#if !isOwn}
-						<div class="message-sender">
+					<!-- Sender name (show for first message in a group from this sender) -->
+					{#if !sameSenderAsPrev}
+						<div class="message-sender" class:message-sender--own={isOwn}>
 							{getDisplayName(message.sender)}
 						</div>
 					{/if}
@@ -103,7 +127,7 @@
 					<!-- Message content -->
 					<div class="message-content">
 						{#if messageType === 'm.text'}
-							{@html renderMarkdown(body)}
+							{@html renderBody(body, isLink)}
 						{:else if messageType === 'm.image'}
 							<img
 								src={$matrixClient?.mxcUrlToHttp(message.content.url) || ''}
@@ -190,6 +214,11 @@
 		align-items: flex-end;
 	}
 
+	/* Grouped messages (same sender) get tighter spacing */
+	.message-wrapper.grouped {
+		margin-top: calc(-1 * var(--space-2));
+	}
+
 	/* Message Sender */
 	.message-sender {
 		font-size: var(--text-xs);
@@ -197,6 +226,11 @@
 		color: var(--accent-primary-bright);
 		margin-bottom: var(--space-1);
 		padding: 0 var(--space-2);
+	}
+
+	.message-sender--own {
+		color: var(--accent-gold);
+		text-align: right;
 	}
 
 	/* Message Content */
@@ -273,5 +307,22 @@
 
 	.file-attachment a:hover {
 		text-decoration: underline;
+	}
+
+	/* Link Feed badge (shown in main chat instead of the actual URL) */
+	.message-content :global(.link-feed-badge) {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		margin-top: var(--space-1);
+		padding: 2px 10px;
+		background: var(--accent-primary-dim);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-full);
+		font-size: var(--text-xs);
+		font-weight: 600;
+		color: var(--accent-primary-bright);
+		white-space: nowrap;
+		cursor: default;
 	}
 </style>

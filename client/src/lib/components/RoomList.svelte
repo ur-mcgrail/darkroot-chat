@@ -1,11 +1,50 @@
 <script lang="ts">
-	import { rooms, currentRoomId } from '$lib/stores/matrix';
-	import { setCurrentRoom, getRoomName, getLastMessagePreview, getUnreadCount } from '$lib/matrix/rooms';
+	import { onMount } from 'svelte';
+	import { rooms, currentRoomId, matrixClient } from '$lib/stores/matrix';
+	import { setCurrentRoom, getRoomName, getLastMessagePreview, getUnreadCount, listPublicRooms, joinRoom } from '$lib/matrix/rooms';
 	import { getClient } from '$lib/matrix/client';
 	import CreateRoomModal from './CreateRoomModal.svelte';
 	import type * as sdk from 'matrix-js-sdk';
 
 	let showCreateModal = false;
+
+	// Discoverable public rooms the user hasn't joined yet
+	let discoverableRooms: { roomId: string; name: string; topic: string; numMembers: number }[] = [];
+	let joiningRoomId: string | null = null;
+
+	// Load discoverable rooms on mount and when joined rooms change
+	onMount(() => {
+		loadDiscoverableRooms();
+	});
+
+	$: if ($rooms) {
+		loadDiscoverableRooms();
+	}
+
+	async function loadDiscoverableRooms() {
+		try {
+			const publicRooms = await listPublicRooms();
+			const joinedRoomIds = new Set($rooms.map((r) => r.roomId));
+			discoverableRooms = publicRooms.filter((r) => !joinedRoomIds.has(r.roomId));
+		} catch (err) {
+			console.warn('Failed to load public rooms:', err);
+			discoverableRooms = [];
+		}
+	}
+
+	async function handleJoinRoom(roomId: string) {
+		joiningRoomId = roomId;
+		try {
+			const room = await joinRoom(roomId);
+			setCurrentRoom(room.roomId);
+			// Refresh discoverable list
+			await loadDiscoverableRooms();
+		} catch (err: any) {
+			console.error('Failed to join room:', err);
+		} finally {
+			joiningRoomId = null;
+		}
+	}
 
 	function handleRoomClick(roomId: string) {
 		setCurrentRoom(roomId);
@@ -22,7 +61,6 @@
 
 	function handleRoomCreated(event: CustomEvent) {
 		const { room } = event.detail;
-		// Select the newly created room
 		setCurrentRoom(room.roomId);
 	}
 </script>
@@ -36,40 +74,62 @@
 
 	<!-- Rooms -->
 	<div class="room-list__rooms">
-		{#if $rooms.length === 0}
+		{#if $rooms.length === 0 && discoverableRooms.length === 0}
 			<div class="room-list__empty">
 				<p class="room-list__empty-text">No rooms yet</p>
 			</div>
-		{:else}
-			{#each $rooms as room (room.roomId)}
-				{@const isActive = $currentRoomId === room.roomId}
-				{@const unreadCount = getUnreadCount(room)}
-				{@const lastMessage = getLastMessagePreview(room)}
-				{@const roomName = getRoomName(room)}
-				{@const initial = getRoomInitial(room)}
+		{/if}
 
+		<!-- Joined rooms -->
+		{#each $rooms as room (room.roomId)}
+			{@const isActive = $currentRoomId === room.roomId}
+			{@const unreadCount = getUnreadCount(room)}
+			{@const lastMessage = getLastMessagePreview(room)}
+			{@const roomName = getRoomName(room)}
+			{@const initial = getRoomInitial(room)}
+
+			<button
+				class="room-item"
+				class:active={isActive}
+				on:click={() => handleRoomClick(room.roomId)}
+			>
+				<div class="room-item__avatar">
+					{initial}
+				</div>
+				<div class="room-item__content">
+					<div class="room-item__name">{roomName}</div>
+					<div class="room-item__preview">{lastMessage}</div>
+				</div>
+				{#if unreadCount > 0}
+					<div class="room-item__badge">
+						{unreadCount}
+					</div>
+				{/if}
+			</button>
+		{/each}
+
+		<!-- Discoverable public rooms (not yet joined) -->
+		{#if discoverableRooms.length > 0}
+			<div class="room-list__section-label">Available Rooms</div>
+			{#each discoverableRooms as pubRoom (pubRoom.roomId)}
 				<button
-					class="room-item"
-					class:active={isActive}
-					on:click={() => handleRoomClick(room.roomId)}
+					class="room-item room-item--discover"
+					on:click={() => handleJoinRoom(pubRoom.roomId)}
+					disabled={joiningRoomId === pubRoom.roomId}
 				>
-					<!-- Avatar -->
-					<div class="room-item__avatar">
-						{initial}
+					<div class="room-item__avatar room-item__avatar--discover">
+						{pubRoom.name.charAt(0).toUpperCase()}
 					</div>
-
-					<!-- Content -->
 					<div class="room-item__content">
-						<div class="room-item__name">{roomName}</div>
-						<div class="room-item__preview">{lastMessage}</div>
-					</div>
-
-					<!-- Unread badge -->
-					{#if unreadCount > 0}
-						<div class="room-item__badge">
-							{unreadCount}
+						<div class="room-item__name">{pubRoom.name}</div>
+						<div class="room-item__preview">
+							{#if joiningRoomId === pubRoom.roomId}
+								Joining...
+							{:else}
+								{pubRoom.numMembers} member{pubRoom.numMembers !== 1 ? 's' : ''} · Click to join
+							{/if}
 						</div>
-					{/if}
+					</div>
 				</button>
 			{/each}
 		{/if}
@@ -237,5 +297,40 @@
 		font-weight: 700;
 		box-shadow: var(--shadow-glow-gold);
 		flex-shrink: 0;
+	}
+
+	/* Discoverable rooms section */
+	.room-list__section-label {
+		padding: var(--space-3) var(--space-3) var(--space-1);
+		font-size: 10px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--text-dim);
+		border-top: 1px solid var(--border-subtle);
+		margin-top: var(--space-2);
+	}
+
+	.room-item--discover {
+		opacity: 0.7;
+		border: 1px dashed var(--border-default);
+	}
+
+	.room-item--discover:hover {
+		opacity: 1;
+		border-color: var(--accent-primary);
+		background: rgba(74, 124, 89, 0.08);
+	}
+
+	.room-item__avatar--discover {
+		background: var(--bg-surface);
+		color: var(--text-muted);
+		border: 1px dashed var(--border-default);
+	}
+
+	.room-item--discover:hover .room-item__avatar--discover {
+		background: var(--accent-primary-dim);
+		color: var(--accent-primary-bright);
+		border-color: var(--accent-primary);
 	}
 </style>
