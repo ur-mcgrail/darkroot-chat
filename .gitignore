@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+client/build/
+client/.svelte-kit/
+dist/
+*.local
+
+# Environment files (contains secrets!)
+.env
+.env.local
+.env.prod
+.env.production
+.env.*.local
+*.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Synapse data (generated)
+synapse/data/
+synapse/*.db
+synapse/*.db-shm
+synapse/*.db-wal
+synapse/*.log
+synapse/*.log.*
+synapse/signing.key
+synapse/homeserver.db
+synapse/media_store/
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# Backups
+backups/*.sql
+backups/*.gz
+
+# Temporary files
+*.tmp
+.temp/
+
+# SSL/TLS Certificates (never commit private keys!)
+nginx/ssl/*.pem
+nginx/ssl/*.key
+nginx/ssl/*.crt
+*.pem
+*.key
+*.crt

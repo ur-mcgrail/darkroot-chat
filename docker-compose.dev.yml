@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: darkroot-postgres-dev
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      POSTGRES_USER: ${POSTGRES_USER:-synapse_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Avoid conflict with port 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse_user} -d ${POSTGRES_DB:-synapse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - darkroot-dev
+
+  # Redis (for Synapse caching and presence)
+  redis:
+    image: redis:7-alpine
+    container_name: darkroot-redis-dev
+    volumes:
+      - redis_data_dev:/data
+    restart: unless-stopped
+    networks:
+      - darkroot-dev
+
+  # Matrix Synapse Homeserver
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: darkroot-synapse-dev
+    environment:
+      - SYNAPSE_SERVER_NAME=${SYNAPSE_SERVER_NAME:-darkroot.local}
+      - SYNAPSE_REPORT_STATS=${SYNAPSE_REPORT_STATS:-no}
+      - UID=1000
+      - GID=1000
+    volumes:
+      - ./synapse:/data
+    ports:
+      - "8008:8008"   # Client-Server API
+      - "8448:8448"   # Federation API (optional, disabled in config)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - darkroot-dev
+
+networks:
+  darkroot-dev:
+    driver: bridge
+
+volumes:
+  postgres_data_dev:
+  redis_data_dev:

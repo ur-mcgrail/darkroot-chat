@@ -1,0 +1,22 @@
+{
+  "name": "darkroot",
+  "version": "0.1.0",
+  "description": "Self-hosted Matrix chat platform with Darkroot-themed client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "preview": "cd client && npm run preview",
+    "check": "cd client && npm run check"
+  },
+  "keywords": [
+    "matrix",
+    "chat",
+    "darkroot",
+    "self-hosted",
+    "svelte"
+  ],
+  "author": "Warren McGrail",
+  "license": "MIT"
+}

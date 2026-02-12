@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: darkroot-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-synapse}
+      POSTGRES_USER: ${POSTGRES_USER:-synapse_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_INITDB_ARGS: --encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - darkroot_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synapse_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: darkroot-redis-prod
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - darkroot_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # Matrix Synapse Homeserver
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: darkroot-synapse-prod
+    restart: unless-stopped
+    environment:
+      SYNAPSE_SERVER_NAME: ${SYNAPSE_SERVER_NAME:-darkroot.local}
+      SYNAPSE_REPORT_STATS: ${SYNAPSE_REPORT_STATS:-no}
+    volumes:
+      - ./synapse:/data
+    networks:
+      - darkroot_internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: darkroot-nginx-prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Static frontend files (built by npm run build)
+      - ./client/build:/usr/share/nginx/html:ro
+      # Nginx configuration
+      - ./nginx/darkroot.conf:/etc/nginx/conf.d/default.conf:ro
+      # SSL certificates (Let's Encrypt)
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      # Nginx cache
+      - nginx_cache:/var/cache/nginx
+    networks:
+      - darkroot_internal
+    depends_on:
+      - synapse
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  darkroot_internal:
+    driver: bridge
+    name: darkroot_prod_network
+
+volumes:
+  postgres_data:
+    name: darkroot_postgres_prod
+  redis_data:
+    name: darkroot_redis_prod
+  nginx_cache:
+    name: darkroot_nginx_cache

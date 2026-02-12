@@ -1,0 +1,68 @@
+# Darkroot Matrix Synapse Configuration (Development)
+# Generated: 2026-02-11
+
+server_name: "darkroot.local"
+pid_file: /data/homeserver.pid
+public_baseurl: http://localhost:8008
+
+# Listeners
+listeners:
+  - port: 8008
+    type: http
+    tls: false
+    x_forwarded: true
+    bind_addresses: ['0.0.0.0']
+    resources:
+      - names: [client, federation]
+        compress: false
+
+# Database (PostgreSQL)
+database:
+  name: psycopg2
+  args:
+    user: synapse_user
+    password: change_me_in_production
+    database: synapse
+    host: postgres
+    port: 5432
+    cp_min: 5
+    cp_max: 10
+
+# Logging
+log_config: "/data/darkroot.local.log.config"
+
+# Media storage
+media_store_path: /data/media_store
+max_upload_size: 50M
+
+# Registration
+enable_registration: true
+registration_requires_token: true
+registration_shared_secret: "Qe2@MS1^q1y;9G.8_uV3;hGyc*ZcU:V#DX-X5iSs9LJWVzRwrP"
+
+# Federation (DISABLED for private server)
+federation_enabled: false
+
+# Trusted key servers (empty for private server)
+trusted_key_servers: []
+
+# Security
+report_stats: false
+macaroon_secret_key: "6bdlRde^=A8PhZ-bStCnx;Iw6ZZyN_@bM^eCbl9epqE.V8ccdh"
+form_secret: "3,8PW-civF@DO#Wn:&vtiq#3xid.ivm15,&kpEzE9CF4AS=V4z"
+signing_key_path: "/data/darkroot.local.signing.key"
+
+# Performance
+event_cache_size: 10K
+
+# Presence (enable for online status)
+use_presence: true
+
+# Retention (keep messages indefinitely)
+retention:
+  enabled: false
+
+# URL previews (disable for privacy)
+url_preview_enabled: false
+
+# vim:ft=yaml
