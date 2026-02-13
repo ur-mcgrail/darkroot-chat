@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { currentRoom, currentRoomId } from '$lib/stores/matrix';
+	import { currentRoom, currentRoomId, typingUsers, matrixClient } from '$lib/stores/matrix';
 	import { getRoomName } from '$lib/matrix/rooms';
 	import { fetchRoomMessages, sendMessage } from '$lib/matrix/messages';
+	import { handleTyping, stopTyping } from '$lib/matrix/typing';
 	import MessageList from './MessageList.svelte';
 	import LinkSidebar from './LinkSidebar.svelte';
 
@@ -38,6 +39,7 @@
 		sending = true;
 		try {
 			await sendMessage($currentRoomId, messageText);
+			stopTyping($currentRoomId); // Stop typing notification
 			messageText = '';
 			if (textareaElement) textareaElement.style.height = 'auto';
 		} catch (error) {
@@ -78,12 +80,17 @@
 		}
 	}
 
-	// Auto-resize textarea
+	// Auto-resize textarea and send typing notification
 	function handleInput() {
 		if (!textareaElement) return;
 
 		textareaElement.style.height = 'auto';
 		textareaElement.style.height = `${Math.min(textareaElement.scrollHeight, 200)}px`;
+
+		// Send typing notification if user is typing
+		if ($currentRoomId && messageText.trim()) {
+			handleTyping($currentRoomId);
+		}
 	}
 
 	// File upload handler (future enhancement)
@@ -134,6 +141,35 @@
 			<div class="room-body__chat">
 				<!-- Message List -->
 				<MessageList />
+
+				<!-- Typing Indicators -->
+				{#if $typingUsers.length > 0}
+					<div class="typing-indicator">
+						<div class="typing-indicator__content">
+							<div class="typing-indicator__dots">
+								<span></span>
+								<span></span>
+								<span></span>
+							</div>
+							<span class="typing-indicator__text">
+								{#if $typingUsers.length === 1}
+									{#if $matrixClient}
+										{@const user = $matrixClient.getUser($typingUsers[0])}
+										{user?.displayName || $typingUsers[0].split(':')[0].substring(1)} is typing...
+									{/if}
+								{:else if $typingUsers.length === 2}
+									{#if $matrixClient}
+										{@const user1 = $matrixClient.getUser($typingUsers[0])}
+										{@const user2 = $matrixClient.getUser($typingUsers[1])}
+										{user1?.displayName || $typingUsers[0].split(':')[0].substring(1)} and {user2?.displayName || $typingUsers[1].split(':')[0].substring(1)} are typing...
+									{/if}
+								{:else}
+									Several people are typing...
+								{/if}
+							</span>
+						</div>
+					</div>
+				{/if}
 
 				<!-- Message Input -->
 				<div class="message-input">
@@ -305,6 +341,62 @@
 		flex: 1;
 		min-width: 0; /* allow shrinking */
 		overflow: hidden;
+	}
+
+	/* Typing Indicator */
+	.typing-indicator {
+		padding: var(--space-2) var(--space-4);
+		background: var(--bg-base);
+		border-top: 1px solid var(--border-default);
+		flex-shrink: 0;
+		min-height: 36px;
+		display: flex;
+		align-items: center;
+	}
+
+	.typing-indicator__content {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.typing-indicator__dots {
+		display: flex;
+		gap: 4px;
+		align-items: center;
+	}
+
+	.typing-indicator__dots span {
+		width: 6px;
+		height: 6px;
+		background: var(--accent-primary-bright);
+		border-radius: var(--radius-full);
+		animation: typingDot 1.4s infinite;
+	}
+
+	.typing-indicator__dots span:nth-child(2) {
+		animation-delay: 0.2s;
+	}
+
+	.typing-indicator__dots span:nth-child(3) {
+		animation-delay: 0.4s;
+	}
+
+	@keyframes typingDot {
+		0%, 60%, 100% {
+			opacity: 0.3;
+			transform: scale(0.8);
+		}
+		30% {
+			opacity: 1;
+			transform: scale(1);
+		}
+	}
+
+	.typing-indicator__text {
+		font-size: var(--text-xs);
+		color: var(--text-muted);
+		font-style: italic;
 	}
 
 	/* Message Input */

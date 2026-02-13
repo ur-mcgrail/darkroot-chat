@@ -9,6 +9,8 @@ import { get } from 'svelte/store';
 import { matrixClient, isLoggedIn, currentUser, syncState } from '$lib/stores/matrix';
 import { setupRoomListeners } from './rooms';
 import { setupMessageListeners } from './messages';
+import { setupTypingListeners } from './typing';
+import { setupPresenceListeners } from './presence';
 
 const STORAGE_PREFIX = 'darkroot_';
 
@@ -155,6 +157,8 @@ export async function startClient(client: sdk.MatrixClient): Promise<void> {
 	// Set up event listeners
 	setupRoomListeners(client);
 	setupMessageListeners(client);
+	setupTypingListeners(client);
+	setupPresenceListeners(client);
 
 	// Start syncing
 	await client.startClient({ initialSyncLimit: 20 });

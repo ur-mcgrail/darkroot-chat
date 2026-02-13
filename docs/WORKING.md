@@ -18,15 +18,18 @@
 - Unread message badges
 - Click to select room
 
-✅ **Messaging** (Phase 3)
+✅ **Messaging**
 - Send text messages (Enter to send, Shift+Enter for new line)
 - View message history
 - Real-time message sync
 - Markdown support (bold, italic, code blocks, links)
 - Auto-scroll to latest message
-- Timestamps with smart formatting
+- Relative timestamps ("Just now", "5m ago", "2h ago")
 - Message differentiation (own messages on right, others on left)
 - Image/file attachment support (backend ready)
+- **NEW:** Typing indicators ("Username is typing...")
+- **NEW:** User presence (online/offline dots on avatars)
+- **NEW:** Message reactions (Darkroot-themed: Praise, Humanity, Estus, Bonfire)
 
 ✅ **Room Management** (Phase 4 - NEW!)
 - Create new rooms with + button
@@ -243,13 +246,34 @@ client/src/
 - `routes/register/+page.svelte` — Registration page (both modes)
 - `routes/+layout.svelte` — Auth guard with public route allowlist
 
+## Recent Additions (Feb 13, 2026)
+
+✅ **Better Timestamps**
+- Relative time formatting ("Just now", "5m ago", "Yesterday")
+- Hover to see full timestamp
+- Auto-updates every 30 seconds
+
+✅ **Typing Indicators**
+- Shows "Username is typing..." below chat
+- Animated dots with forest green theme
+- Handles multiple simultaneous typers
+
+✅ **User Presence**
+- Green dot = Online, Gray dot = Offline
+- Shows on message avatars
+- Real-time updates via Matrix presence events
+
+✅ **Message Reactions** (Text-Based, No Emojis!)
+- Darkroot-themed reactions: "Praise", "Humanity", "Estus", "Bonfire"
+- Hover messages to see "+" button
+- Click reactions to toggle (add/remove)
+- Shows reaction count and who reacted (hover tooltip)
+
 ## Next Steps
 
 **Remaining polish:**
-- [ ] DNS A record for `chat.warrenmcgrail.com → 15.204.89.177`
-- [ ] SSL via `sudo certbot --nginx -d chat.warrenmcgrail.com` on VPS
-- [ ] Update env.js to `https://` after SSL
-- [ ] PWA configuration (manifest, service worker, offline)
 - [ ] User settings and profile editing
 - [ ] Desktop notifications
 - [ ] Backup strategy
+- [ ] Message editing/deletion
+- [ ] Read receipts

@@ -7,6 +7,7 @@
 	import RoomList from '$lib/components/RoomList.svelte';
 	import RoomView from '$lib/components/RoomView.svelte';
 	import AdminPanel from '$lib/components/AdminPanel.svelte';
+	import InstallPrompt from '$lib/components/InstallPrompt.svelte';
 
 	let showAdminPanel = false;
 	let isAdmin = false;
@@ -38,6 +39,9 @@
 
 {#if $isLoggedIn && $currentUser}
 	<div class="chat-container">
+		<!-- PWA Install Prompt -->
+		<InstallPrompt />
+
 		<!-- Top Bar -->
 		<div class="top-bar">
 			<div class="top-bar__user">

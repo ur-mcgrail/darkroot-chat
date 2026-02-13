@@ -43,6 +43,9 @@ export const messages = writable<Message[]>([]);
 // Typing indicators
 export const typingUsers = writable<string[]>([]);
 
+// User presence (userId -> presence state)
+export const userPresence = writable<Record<string, 'online' | 'offline' | 'unavailable'>>({});
+
 // User ID (derived from currentUser)
 export const userId = derived(
 	currentUser,
