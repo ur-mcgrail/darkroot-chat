@@ -155,6 +155,23 @@
 		return user?.displayName || userId.split(':')[0].substring(1);
 	}
 
+	/** Get username and server parts separately for styling */
+	function getUsernameParts(userId: string): { username: string; server: string } {
+		if (!$matrixClient) return { username: userId, server: '' };
+
+		const user = $matrixClient.getUser(userId);
+		if (user?.displayName) {
+			return { username: user.displayName, server: '' };
+		}
+
+		// Parse Matrix ID: @username:server
+		const parts = userId.split(':');
+		const username = parts[0]?.substring(1) || userId; // Remove @
+		const server = parts[1] ? `:${parts[1]}` : '';
+
+		return { username, server };
+	}
+
 	onMount(() => {
 		if (messageContainer) {
 			messageContainer.scrollTop = messageContainer.scrollHeight;
@@ -214,8 +231,14 @@
 				<div class="msg-card" class:msg-card--sent={isOwn} class:msg-card--received={!isOwn}>
 					<!-- Header bar (sender + time) — show on first message in group -->
 					{#if !sameSenderAsPrev}
+						{@const nameParts = getUsernameParts(message.sender)}
 						<div class="msg-card__header" class:msg-card__header--own={isOwn}>
-							<span class="msg-card__sender">{getDisplayName(message.sender)}</span>
+							<span class="msg-card__sender">
+								<span class="msg-card__sender-name">{nameParts.username}</span>
+								{#if nameParts.server}
+									<span class="msg-card__sender-server">{nameParts.server}</span>
+								{/if}
+							</span>
 							<span
 								class="msg-card__time"
 								title={formatFullTimestamp(message.timestamp)}
@@ -285,6 +308,13 @@
 									<span class="msg-reaction__count">{reaction.count}</span>
 								</button>
 							{/each}
+						</div>
+					{/if}
+
+					<!-- Footer (date stamp) -->
+					{#if !sameSenderAsPrev}
+						<div class="msg-card__footer">
+							<span class="msg-card__date">{formatFullTimestamp(message.timestamp)}</span>
 						</div>
 					{/if}
 
@@ -492,6 +522,18 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		display: flex;
+		align-items: baseline;
+	}
+
+	.msg-card__sender-name {
+		font-weight: 700;
+	}
+
+	.msg-card__sender-server {
+		opacity: 0.5;
+		font-weight: 400;
+		margin-left: 1px;
 	}
 
 	.msg-card__header--own .msg-card__sender {
@@ -504,6 +546,25 @@
 		white-space: nowrap;
 		flex-shrink: 0;
 		font-family: var(--font-mono);
+	}
+
+	/* ── Card Footer ── */
+	.msg-card__footer {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		padding: var(--space-1) var(--space-3);
+		background: rgba(0, 0, 0, 0.1);
+		border-top: 1px solid rgba(255, 255, 255, 0.05);
+		min-height: 24px;
+	}
+
+	.msg-card__date {
+		font-size: 9px;
+		color: var(--text-dim);
+		opacity: 0.6;
+		font-family: var(--font-mono);
+		font-style: italic;
 	}
 
 	/* ── Card Body ── */
