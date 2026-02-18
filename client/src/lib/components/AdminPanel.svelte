@@ -56,10 +56,10 @@
 		if (activeTab === 'users') loadUsers();
 	}
 
-	$: if (activeTab === 'users' && show && users.length === 0 && !usersLoading) {
+	$: if (activeTab === 'users' && show && users.length === 0 && !usersLoading && !usersError) {
 		loadUsers();
 	}
-	$: if (activeTab === 'invites' && show && tokens.length === 0 && !loading) {
+	$: if (activeTab === 'invites' && show && tokens.length === 0 && !loading && !error) {
 		loadTokens();
 	}
 

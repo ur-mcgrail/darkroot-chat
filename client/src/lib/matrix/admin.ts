@@ -216,7 +216,10 @@ export interface MatrixUser {
  * List all non-guest users on the server (admin only)
  */
 export async function listUsers(limit = 200): Promise<MatrixUser[]> {
-	const url = `${getAdminApiUrl()}/users?from=0&limit=${limit}&guests=false`;
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+	const baseUrl = `${client.baseUrl}/_synapse/admin/v2`;
+	const url = `${baseUrl}/users?from=0&limit=${limit}&guests=false`;
 
 	const response = await fetch(url, {
 		method: 'GET',

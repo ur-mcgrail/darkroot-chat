@@ -22,29 +22,39 @@
 	// Auto-switch to chat view when a room is selected on mobile
 	$: if ($currentRoomId && isMobile) mobileTab = 'chat';
 
-	// Build online users list from room members + presence store
-	$: onlineUsers = (() => {
-		if (!$matrixClient) return [];
-		const myId = $matrixClient.getUserId();
-		const seen = new Set<string>();
-		return $rooms
-			.flatMap(r => r.getJoinedMembers())
-			.filter(m => {
-				if (m.userId === myId || seen.has(m.userId)) return false;
-				seen.add(m.userId);
-				return true;
-			})
-			.map(m => ({
-				userId: m.userId,
-				displayName: m.name || m.userId.split(':')[0].substring(1),
-				presence: $userPresence[m.userId] || 'offline',
-			}))
-			.sort((a, b) => {
-				const ao = a.presence === 'online' ? 0 : 1;
-				const bo = b.presence === 'online' ? 0 : 1;
-				return ao !== bo ? ao - bo : a.displayName.localeCompare(b.displayName);
-			});
-	})();
+	// Build online users list — recomputed only when presence changes (not every message)
+	let onlineUsers: { userId: string; displayName: string; presence: string }[] = [];
+	$: {
+		const client = $matrixClient;
+		const presence = $userPresence;
+		if (client) {
+			try {
+				const myId = client.getUserId();
+				const seen = new Set<string>();
+				onlineUsers = client.getRooms()
+					.flatMap((r: any) => {
+						try { return r.getJoinedMembers(); } catch { return []; }
+					})
+					.filter((m: any) => {
+						if (!m?.userId || m.userId === myId || seen.has(m.userId)) return false;
+						seen.add(m.userId);
+						return true;
+					})
+					.map((m: any) => ({
+						userId: m.userId,
+						displayName: m.name || m.userId.split(':')[0].substring(1),
+						presence: presence[m.userId] || 'offline',
+					}))
+					.sort((a: any, b: any) => {
+						const ao = a.presence === 'online' ? 0 : 1;
+						const bo = b.presence === 'online' ? 0 : 1;
+						return ao !== bo ? ao - bo : a.displayName.localeCompare(b.displayName);
+					});
+			} catch (e) {
+				// ignore transient errors during room member enumeration
+			}
+		}
+	}
 
 	onMount(async () => {
 		if ($isLoggedIn) isAdmin = await isServerAdmin();
