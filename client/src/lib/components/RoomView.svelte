@@ -7,11 +7,16 @@
 	import MessageList from './MessageList.svelte';
 	import LinkSidebar from './LinkSidebar.svelte';
 
+	// When false, the link panel and its toggle button are hidden (e.g. on mobile)
+	export let showLinks = true;
+
 	let messageText = '';
 	let sending = false;
 	let textareaElement: HTMLTextAreaElement;
 	let showLinkSidebar = true;
 	let showXWarning = false;
+
+	$: if (!showLinks) showLinkSidebar = false;
 
 	// X / Twitter link detection
 	const X_LINK_REGEX = /https?:\/\/(www\.)?(twitter\.com|x\.com)\/[^\s]+/i;
@@ -121,6 +126,7 @@
 				</div>
 			</div>
 			<div class="room-header__actions">
+				{#if showLinks}
 				<button
 					class="room-header__toggle-links"
 					class:active={showLinkSidebar}
@@ -132,6 +138,7 @@
 						<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
 					</svg>
 				</button>
+				{/if}
 			</div>
 		</div>
 
@@ -199,7 +206,7 @@
 			</div>
 
 			<!-- Link Sidebar -->
-			<LinkSidebar visible={showLinkSidebar} />
+			{#if showLinks}<LinkSidebar visible={showLinkSidebar} />{/if}
 		</div>
 	{:else}
 		<!-- No Room Selected -->
