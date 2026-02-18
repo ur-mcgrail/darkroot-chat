@@ -1,18 +1,27 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createEventDispatcher } from 'svelte';
+	import { matrixClient } from '$lib/stores/matrix';
 	import {
 		listRegistrationTokens,
 		createRegistrationToken,
 		deleteRegistrationToken,
 		generateInviteLink,
+		listUsers,
+		resetUserPassword,
+		generateTempPassword,
 		type RegistrationToken,
+		type MatrixUser,
 	} from '$lib/matrix/admin';
 
 	const dispatch = createEventDispatcher();
 
 	export let show = false;
 
+	// Tab state
+	let activeTab: 'invites' | 'users' = 'invites';
+
+	// Invites tab state
 	let tokens: RegistrationToken[] = [];
 	let loading = true;
 	let error = '';
@@ -28,7 +37,29 @@
 	let quickInviteLink = '';
 	let showQuickInvite = false;
 
+	// Users tab state
+	let users: MatrixUser[] = [];
+	let usersLoading = false;
+	let usersError = '';
+	let currentUserId = '';
+
+	// Reset password state: tracks which user is being reset and the result
+	let resetTarget: MatrixUser | null = null;   // user whose reset button was clicked
+	let resetting = false;
+	let resetTempPassword = '';                   // shown after successful reset
+	let resetError = '';
+	let resetCopied = false;
+
 	$: if (show) {
+		currentUserId = $matrixClient?.getUserId() || '';
+		if (activeTab === 'invites') loadTokens();
+		if (activeTab === 'users') loadUsers();
+	}
+
+	$: if (activeTab === 'users' && show && users.length === 0 && !usersLoading) {
+		loadUsers();
+	}
+	$: if (activeTab === 'invites' && show && tokens.length === 0 && !loading) {
 		loadTokens();
 	}
 
@@ -180,7 +211,81 @@
 	function handleClose() {
 		show = false;
 		showCreateForm = false;
+		resetTarget = null;
+		resetTempPassword = '';
 		dispatch('close');
+	}
+
+	// ── Users tab ──────────────────────────────────────────────────────────────
+
+	async function loadUsers() {
+		usersLoading = true;
+		usersError = '';
+		try {
+			const all = await listUsers();
+			// Sort: admins first, then alphabetically by display name
+			users = all.sort((a, b) => {
+				if (a.admin !== b.admin) return a.admin ? -1 : 1;
+				const nameA = a.displayname || a.name;
+				const nameB = b.displayname || b.name;
+				return nameA.localeCompare(nameB);
+			});
+		} catch (err: any) {
+			usersError = err.message || 'Failed to load users';
+		} finally {
+			usersLoading = false;
+		}
+	}
+
+	function getLocalpart(matrixId: string): string {
+		// @user:server.local → "user"
+		return matrixId.replace(/^@/, '').split(':')[0];
+	}
+
+	function startReset(user: MatrixUser) {
+		resetTarget = user;
+		resetTempPassword = '';
+		resetError = '';
+		resetCopied = false;
+	}
+
+	function cancelReset() {
+		resetTarget = null;
+		resetTempPassword = '';
+		resetError = '';
+	}
+
+	async function confirmReset() {
+		if (!resetTarget) return;
+		resetting = true;
+		resetError = '';
+
+		const tempPw = generateTempPassword();
+
+		try {
+			await resetUserPassword(resetTarget.name, tempPw);
+			resetTempPassword = tempPw;
+		} catch (err: any) {
+			resetError = err.message || 'Failed to reset password';
+		} finally {
+			resetting = false;
+		}
+	}
+
+	async function copyTempPassword() {
+		try {
+			await copyToClipboard(resetTempPassword);
+			resetCopied = true;
+			setTimeout(() => { resetCopied = false; }, 2000);
+		} catch {
+			// ignore — user can select manually
+		}
+	}
+
+	function doneReset() {
+		resetTarget = null;
+		resetTempPassword = '';
+		resetCopied = false;
 	}
 
 	function formatDate(timestamp: number | null): string {
@@ -215,15 +320,34 @@
 				<button class="close-button" on:click={handleClose} aria-label="Close">×</button>
 			</div>
 
+			<!-- Tabs -->
+			<div class="tab-bar">
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'invites'}
+					on:click={() => { activeTab = 'invites'; }}
+				>
+					Invites
+				</button>
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'users'}
+					on:click={() => { activeTab = 'users'; loadUsers(); }}
+				>
+					Users
+				</button>
+			</div>
+
 			<!-- Body -->
 			<div class="modal-body">
 				<!-- Error Message -->
-				{#if error}
+				{#if error && activeTab === 'invites'}
 					<div class="error-message">
 						⚠️ {error}
 					</div>
 				{/if}
 
+				{#if activeTab === 'invites'}
 				<!-- Quick Invite Section -->
 				<div class="quick-invite-section">
 					<h3>🔗 Quick Invite</h3>
@@ -373,6 +497,102 @@
 						</div>
 					{/if}
 				</div>
+
+			{:else}
+				<!-- ── Users Tab ─────────────────────────────────────────────────── -->
+
+				{#if usersError}
+					<div class="error-message">⚠️ {usersError}</div>
+				{/if}
+
+				{#if usersLoading}
+					<div class="loading">Loading users...</div>
+				{:else if users.length === 0}
+					<div class="empty-state"><p>No users found</p></div>
+				{:else}
+					<div class="users-list">
+						{#each users as user (user.name)}
+							<div class="user-card" class:deactivated={user.deactivated}>
+								<!-- User info row -->
+								<div class="user-info">
+									<div class="user-avatar">
+										{getLocalpart(user.name).charAt(0).toUpperCase()}
+									</div>
+									<div class="user-details">
+										<div class="user-name">
+											{user.displayname || getLocalpart(user.name)}
+											{#if user.admin}
+												<span class="badge badge-warning">Admin</span>
+											{/if}
+											{#if user.deactivated}
+												<span class="badge badge-error">Deactivated</span>
+											{/if}
+										</div>
+										<div class="user-id">{user.name}</div>
+									</div>
+									{#if user.name !== currentUserId && !user.deactivated}
+										<button
+											class="btn-secondary btn-sm"
+											on:click={() => startReset(user)}
+											disabled={resetting && resetTarget?.name === user.name}
+										>
+											Reset Password
+										</button>
+									{/if}
+								</div>
+
+								<!-- Reset password flow (inline, below the user row) -->
+								{#if resetTarget?.name === user.name}
+									<div class="reset-panel">
+										{#if resetTempPassword}
+											<!-- Step 2: Show the generated password -->
+											<p class="reset-instruction">
+												Password reset. Share this temporary password with <strong>{user.displayname || getLocalpart(user.name)}</strong> — they'll be logged out of all devices.
+											</p>
+											<div class="temp-pw-display">
+												<code>{resetTempPassword}</code>
+												<button
+													class="btn-secondary btn-sm"
+													on:click={copyTempPassword}
+												>
+													{resetCopied ? '✓ Copied' : '📋 Copy'}
+												</button>
+											</div>
+											<p class="reset-hint">
+												Ask them to change it in Settings after logging in.
+											</p>
+											<button class="btn-primary btn-sm" on:click={doneReset}>
+												Done
+											</button>
+										{:else}
+											<!-- Step 1: Confirm the reset -->
+											<p class="reset-instruction">
+												Reset the password for <strong>{user.displayname || getLocalpart(user.name)}</strong>?
+												A temporary password will be generated. They will be logged out of all devices.
+											</p>
+											{#if resetError}
+												<div class="error-message">⚠️ {resetError}</div>
+											{/if}
+											<div class="reset-actions">
+												<button
+													class="btn-danger btn-sm"
+													on:click={confirmReset}
+													disabled={resetting}
+												>
+													{resetting ? 'Resetting...' : 'Yes, Reset Password'}
+												</button>
+												<button class="btn-secondary btn-sm" on:click={cancelReset}>
+													Cancel
+												</button>
+											</div>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			{/if}
 			</div>
 		</div>
 	</div>
@@ -737,5 +957,147 @@
 		border-radius: var(--radius-sm);
 		color: var(--status-live);
 		font-size: var(--text-sm);
+	}
+
+	/* ── Tabs ── */
+	.tab-bar {
+		display: flex;
+		border-bottom: 1px solid var(--border-subtle);
+		padding: 0 var(--space-5);
+		background: var(--bg-elevated);
+	}
+
+	.tab-btn {
+		padding: var(--space-3) var(--space-5);
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		color: var(--text-muted);
+		font-size: var(--text-sm);
+		font-weight: 600;
+		cursor: pointer;
+		transition: all var(--transition-fast);
+		margin-bottom: -1px;
+	}
+
+	.tab-btn:hover {
+		color: var(--text-primary);
+	}
+
+	.tab-btn.active {
+		color: var(--accent-primary-bright);
+		border-bottom-color: var(--accent-primary-bright);
+	}
+
+	/* ── Users tab ── */
+	.users-list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.user-card {
+		background: var(--bg-surface);
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		overflow: hidden;
+	}
+
+	.user-card.deactivated {
+		opacity: 0.5;
+	}
+
+	.user-info {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-4);
+	}
+
+	.user-avatar {
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		background: var(--accent-primary);
+		color: var(--text-primary);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-weight: 700;
+		font-size: var(--text-base);
+		flex-shrink: 0;
+	}
+
+	.user-details {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.user-name {
+		font-weight: 600;
+		color: var(--text-primary);
+		font-size: var(--text-sm);
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.user-id {
+		font-size: var(--text-xs);
+		color: var(--text-dim);
+		font-family: var(--font-mono);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* ── Reset password panel ── */
+	.reset-panel {
+		padding: var(--space-4);
+		background: var(--bg-base);
+		border-top: 1px solid var(--border-subtle);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+	}
+
+	.reset-instruction {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--text-secondary);
+		line-height: 1.5;
+	}
+
+	.reset-hint {
+		margin: 0;
+		font-size: var(--text-xs);
+		color: var(--text-dim);
+	}
+
+	.reset-actions {
+		display: flex;
+		gap: var(--space-2);
+	}
+
+	.temp-pw-display {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-3);
+		background: var(--bg-surface);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-md);
+	}
+
+	.temp-pw-display code {
+		flex: 1;
+		font-family: var(--font-mono);
+		font-size: var(--text-base);
+		font-weight: 700;
+		color: var(--accent-primary-bright);
+		letter-spacing: 0.05em;
 	}
 </style>

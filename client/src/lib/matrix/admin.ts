@@ -201,3 +201,78 @@ export async function deleteRegistrationToken(token: string): Promise<void> {
 export function generateInviteLink(token: string, baseUrl: string = window.location.origin): string {
 	return `${baseUrl}/register?token=${encodeURIComponent(token)}`;
 }
+
+// ── User management ───────────────────────────────────────────────────────────
+
+export interface MatrixUser {
+	name: string;          // full Matrix ID e.g. @user:darkroot.local
+	displayname: string | null;
+	is_guest: boolean;
+	admin: boolean;
+	deactivated: boolean;
+}
+
+/**
+ * List all non-guest users on the server (admin only)
+ */
+export async function listUsers(limit = 200): Promise<MatrixUser[]> {
+	const url = `${getAdminApiUrl()}/users?from=0&limit=${limit}&guests=false`;
+
+	const response = await fetch(url, {
+		method: 'GET',
+		headers: {
+			'Authorization': `Bearer ${getAccessToken()}`,
+			'Content-Type': 'application/json',
+		},
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.error || 'Failed to list users');
+	}
+
+	const data = await response.json();
+	return data.users || [];
+}
+
+/**
+ * Reset a user's password (admin only). Logs out all devices.
+ */
+export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {
+	const url = `${getAdminApiUrl()}/reset_password/${encodeURIComponent(userId)}`;
+
+	const response = await fetch(url, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${getAccessToken()}`,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ new_password: newPassword, logout_devices: true }),
+	});
+
+	if (!response.ok) {
+		const error = await response.json();
+		throw new Error(error.error || 'Failed to reset password');
+	}
+}
+
+/**
+ * Generate a readable temporary password for admin-initiated resets.
+ * Format: Adjective-Noun-NNNN — easy to read aloud or type from memory.
+ */
+export function generateTempPassword(): string {
+	const adjectives = [
+		'Amber', 'Ashen', 'Bone', 'Cinder', 'Dark', 'Ember', 'Frost',
+		'Grim', 'Hollow', 'Iron', 'Jade', 'Lost', 'Moss', 'Noble',
+		'Ochre', 'Pine', 'Quiet', 'Root', 'Stone', 'Thorn', 'Void', 'Wisp',
+	];
+	const nouns = [
+		'Bonfire', 'Coil', 'Drake', 'Ember', 'Flame', 'Grove', 'Hunter',
+		'Kindle', 'Lance', 'Marsh', 'Night', 'Oak', 'Pyre', 'River',
+		'Shade', 'Tower', 'Vale', 'Wyrm', 'Crest', 'Forge',
+	];
+	const num = Math.floor(1000 + Math.random() * 9000);
+	const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+	const noun = nouns[Math.floor(Math.random() * nouns.length)];
+	return `${adj}-${noun}-${num}`;
+}
