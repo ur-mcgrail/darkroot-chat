@@ -75,10 +75,10 @@ echo -e "${GREEN}✓ Files transferred${NC}"
 # Step 6: Deploy on VPS
 echo -e "${BLUE}🔧 Deploying on VPS...${NC}"
 ssh "$VPS" "cd $VPS_DIR && \
-    docker compose -f docker-compose.prod.yml pull && \
-    docker compose -f docker-compose.prod.yml up -d && \
+    docker compose -f docker-compose.prod.yml --env-file .env.prod pull && \
+    docker compose -f docker-compose.prod.yml --env-file .env.prod up -d && \
     sleep 5 && \
-    docker compose -f docker-compose.prod.yml ps"
+    docker compose -f docker-compose.prod.yml --env-file .env.prod ps"
 echo -e "${GREEN}✓ Deployment complete${NC}"
 
 # Step 7: Cleanup
