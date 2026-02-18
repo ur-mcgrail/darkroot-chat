@@ -68,8 +68,7 @@ echo -e "${GREEN}✓ Package created (frontend + nginx + compose)${NC}"
 
 # Step 5: Transfer to VPS
 echo -e "${BLUE}📤 Transferring to VPS...${NC}"
-rsync -avz --delete \
-    --exclude='synapse/' \
+rsync -avz \
     "$TEMP_DIR/" "$VPS:$VPS_DIR/"
 echo -e "${GREEN}✓ Files transferred${NC}"
 
