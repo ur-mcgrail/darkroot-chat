@@ -73,48 +73,55 @@ export async function removeReaction(
 }
 
 /**
- * Get aggregated reactions for a message
+ * Get aggregated reactions for a message (SDK v40+ compatible).
+ * Uses room.relations.getChildEventsForEvent instead of the removed event.getRelations().
  */
 export function getMessageReactions(event: sdk.MatrixEvent): Reaction[] {
 	const client = get(matrixClient);
-	if (!client) return [];
+	if (!client || !event) return [];
+
+	const eventId = event.getId();
+	const roomId = event.getRoomId();
+	if (!eventId || !roomId) return [];
+
+	const room = client.getRoom(roomId);
+	if (!room) return [];
 
 	const currentUserId = client.getUserId();
-	const relations = event.getRelation();
 
-	// Get all reaction events for this message
-	const reactionEvents = event
-		.getRelations()
-		?.getChildEvents()
-		?.filter(e => e.getType() === 'm.reaction') || [];
+	// SDK v40: use room.relations.getChildEventsForEvent
+	const relations = room.relations.getChildEventsForEvent(
+		eventId,
+		'm.annotation',
+		'm.reaction'
+	);
 
-	// Group reactions by key
+	const annotationsBySender = relations?.getAnnotationsBySender() || {};
+
+	// Build a map from reaction key → { users, eventIds }
 	const reactionMap = new Map<string, { users: string[]; eventIds: Map<string, string> }>();
 
-	for (const reactionEvent of reactionEvents) {
-		const content = reactionEvent.getContent();
-		const relatesTo = content['m.relates_to'];
+	for (const [userId, events] of Object.entries(annotationsBySender)) {
+		for (const reactionEvent of events) {
+			const content = reactionEvent.getContent();
+			const relatesTo = content['m.relates_to'];
+			if (!relatesTo || relatesTo.rel_type !== 'm.annotation') continue;
 
-		if (!relatesTo || relatesTo.rel_type !== 'm.annotation') continue;
+			const key = relatesTo.key;
+			const reactionEventId = reactionEvent.getId();
+			if (!key || !reactionEventId) continue;
 
-		const key = relatesTo.key;
-		const userId = reactionEvent.getSender();
-		const eventId = reactionEvent.getId();
-
-		if (!userId || !eventId) continue;
-
-		if (!reactionMap.has(key)) {
-			reactionMap.set(key, { users: [], eventIds: new Map() });
-		}
-
-		const reaction = reactionMap.get(key)!;
-		if (!reaction.users.includes(userId)) {
-			reaction.users.push(userId);
-			reaction.eventIds.set(userId, eventId);
+			if (!reactionMap.has(key)) {
+				reactionMap.set(key, { users: [], eventIds: new Map() });
+			}
+			const bucket = reactionMap.get(key)!;
+			if (!bucket.users.includes(userId)) {
+				bucket.users.push(userId);
+				bucket.eventIds.set(userId, reactionEventId);
+			}
 		}
 	}
 
-	// Convert to Reaction array
 	const reactions: Reaction[] = [];
 	for (const [key, data] of reactionMap.entries()) {
 		reactions.push({
@@ -125,11 +132,12 @@ export function getMessageReactions(event: sdk.MatrixEvent): Reaction[] {
 		});
 	}
 
-	return reactions.sort((a, b) => b.count - a.count); // Sort by count descending
+	return reactions.sort((a, b) => b.count - a.count);
 }
 
 /**
- * Toggle a reaction (add if not reacted, remove if already reacted)
+ * Toggle a reaction (add if not reacted, remove if already reacted).
+ * SDK v40+ compatible.
  */
 export async function toggleReaction(
 	roomId: string,
@@ -141,32 +149,34 @@ export async function toggleReaction(
 
 	const currentUserId = client.getUserId();
 	const messageId = messageEvent.getId();
-
 	if (!currentUserId || !messageId) return;
 
-	// Find if user already reacted with this key
-	const reactionEvents = messageEvent
-		.getRelations()
-		?.getChildEvents()
-		?.filter(e => e.getType() === 'm.reaction') || [];
+	const room = client.getRoom(roomId);
+	if (!room) return;
 
-	const existingReaction = reactionEvents.find(e => {
-		const content = e.getContent();
-		const relatesTo = content['m.relates_to'];
-		return (
-			relatesTo?.key === reactionKey &&
-			e.getSender() === currentUserId
-		);
-	});
+	// Find existing reaction by current user with this key
+	const relations = room.relations.getChildEventsForEvent(
+		messageId,
+		'm.annotation',
+		'm.reaction'
+	);
+	const annotationsBySender = relations?.getAnnotationsBySender() || {};
+	const myReactions = annotationsBySender[currentUserId];
 
-	if (existingReaction) {
-		// Remove reaction
-		const reactionId = existingReaction.getId();
-		if (reactionId) {
-			await removeReaction(roomId, reactionId);
+	let existingReactionId: string | undefined;
+	if (myReactions) {
+		for (const e of myReactions) {
+			const content = e.getContent();
+			if (content['m.relates_to']?.key === reactionKey) {
+				existingReactionId = e.getId() ?? undefined;
+				break;
+			}
 		}
+	}
+
+	if (existingReactionId) {
+		await removeReaction(roomId, existingReactionId);
 	} else {
-		// Add reaction
 		await sendReaction(roomId, messageId, reactionKey);
 	}
 }
