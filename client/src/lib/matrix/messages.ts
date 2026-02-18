@@ -131,21 +131,32 @@ export async function sendFile(roomId: string, file: File): Promise<void> {
  * Set up message event listeners for real-time updates
  */
 export function setupMessageListeners(client: sdk.MatrixClient): void {
-	// Listen for new timeline events (messages)
+	// Listen for new timeline events (messages and reactions)
 	client.on(sdk.RoomEvent.Timeline, async (event, room, toStartOfTimeline) => {
 		// Ignore events added to the start of the timeline (pagination)
 		if (toStartOfTimeline) return;
 
-		// Only process message events for the current room
+		// Only process events for the current room
 		const currentRoom = get(currentRoomId);
 		if (!room || room.roomId !== currentRoom) return;
 
-		if (event.getType() === 'm.room.message') {
-			console.log('New message received:', event.getContent());
+		const type = event.getType();
 
-			// Refresh messages for current room
+		if (type === 'm.room.message') {
+			console.log('New message received:', event.getContent());
 			await fetchRoomMessages(room.roomId);
+		} else if (type === 'm.reaction') {
+			// Reaction added — SDK has already updated room.relations by this point.
+			// Force a re-render so getMessageReactions() picks up the new reaction.
+			messages.update(msgs => [...msgs]);
 		}
+	});
+
+	// Listen for redactions (reaction removals also fire this)
+	client.on(sdk.RoomEvent.Redaction, (_event, room) => {
+		const currentRoom = get(currentRoomId);
+		if (!room || room.roomId !== currentRoom) return;
+		messages.update(msgs => [...msgs]);
 	});
 
 	console.log('Message listeners set up');
