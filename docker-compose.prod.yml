@@ -47,7 +47,7 @@ services:
 
   # Matrix Synapse Homeserver
   synapse:
-    image: matrixdotorg/synapse:latest
+    image: matrixdotorg/synapse:v1.147.0
     container_name: darkroot-synapse-prod
     restart: unless-stopped
     environment:
