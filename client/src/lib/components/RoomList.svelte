@@ -6,8 +6,30 @@
 	import CreateRoomModal from './CreateRoomModal.svelte';
 	import { getRoomIcon } from '$lib/utils/roomIcons';
 	import type * as sdk from 'matrix-js-sdk';
+	import { fetchMediaUrl } from '$lib/utils/media';
 
 	let showCreateModal = false;
+
+	// Room avatar blob URLs (indexed by roomId, null if no Matrix avatar set)
+	let roomAvatarUrls: Record<string, string | null> = {};
+	const roomAvatarFetchStarted = new Set<string>(); // keyed by `${roomId}:${mxcUrl}`
+
+	function ensureRoomAvatar(room: sdk.Room) {
+		if (!$matrixClient) return;
+		const mxcUrl = room.getMxcAvatarUrl() || '';
+		const cacheKey = `${room.roomId}:${mxcUrl}`;
+		if (roomAvatarFetchStarted.has(cacheKey)) return;
+		roomAvatarFetchStarted.add(cacheKey);
+		if (!mxcUrl) {
+			roomAvatarUrls[room.roomId] = null;
+			roomAvatarUrls = roomAvatarUrls;
+			return;
+		}
+		fetchMediaUrl($matrixClient, mxcUrl, 40, 40, 'crop').then((blobUrl) => {
+			roomAvatarUrls[room.roomId] = blobUrl;
+			roomAvatarUrls = roomAvatarUrls;
+		});
+	}
 
 	// Discoverable public rooms the user hasn't joined yet
 	let discoverableRooms: { roomId: string; name: string; topic: string; numMembers: number }[] = [];
@@ -20,6 +42,9 @@
 
 	$: if ($rooms) {
 		loadDiscoverableRooms();
+		if ($matrixClient) {
+			for (const room of $rooms) ensureRoomAvatar(room);
+		}
 	}
 
 	async function loadDiscoverableRooms() {
@@ -81,9 +106,11 @@
 			</div>
 		{/if}
 
-		<!-- Joined rooms -->
+		<!-- Joined + invited rooms -->
 		{#each $rooms as room (room.roomId)}
 			{@const isActive = $currentRoomId === room.roomId}
+			{@const membership = room.getMyMembership()}
+			{@const isInvited = membership === 'invite'}
 			{@const unreadCount = getUnreadCount(room)}
 			{@const lastMessage = getLastMessagePreview(room)}
 			{@const roomName = getRoomName(room)}
@@ -92,16 +119,25 @@
 			<button
 				class="room-item"
 				class:active={isActive}
+				class:invited={isInvited}
 				on:click={() => handleRoomClick(room.roomId)}
 			>
 				<div class="room-item__avatar">
-					{@html getRoomIcon(roomName)}
+					{#if roomAvatarUrls[room.roomId]}
+						<img class="room-item__avatar-img" src={roomAvatarUrls[room.roomId]} alt={roomName} />
+					{:else}
+						{@html getRoomIcon(roomName)}
+					{/if}
 				</div>
 				<div class="room-item__content">
 					<div class="room-item__name">{roomName}</div>
-					<div class="room-item__preview">{lastMessage}</div>
+					<div class="room-item__preview">
+						{#if isInvited}You have been invited{:else}{lastMessage}{/if}
+					</div>
 				</div>
-				{#if unreadCount > 0}
+				{#if isInvited}
+					<div class="room-item__invite-badge">Invited</div>
+				{:else if unreadCount > 0}
 					<div class="room-item__badge">
 						{unreadCount}
 					</div>
@@ -257,6 +293,15 @@
 		text-transform: uppercase;
 	}
 
+	/* Room avatar image (Matrix m.room.avatar) */
+	.room-item__avatar-img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		border-radius: var(--radius-sm);
+		image-rendering: pixelated;
+	}
+
 	/* DS icon SVG sizing within the avatar square */
 	.room-item__avatar :global(svg) {
 		width: 22px;
@@ -296,6 +341,39 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		margin-top: 2px;
+	}
+
+	/* Invited rooms — gold tint */
+	.room-item.invited {
+		border-color: rgba(150, 168, 92, 0.25);
+	}
+
+	.room-item.invited .room-item__avatar {
+		color: var(--accent-gold-bright);
+		background: var(--accent-gold-dim);
+		border-color: var(--accent-gold-soft, var(--accent-gold-dim));
+	}
+
+	.room-item.invited .room-item__name {
+		color: var(--accent-gold-bright);
+	}
+
+	.room-item__invite-badge {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 var(--space-2);
+		height: 18px;
+		background: var(--accent-gold-dim);
+		color: var(--accent-gold-bright);
+		border: 1px solid var(--accent-gold);
+		border-radius: var(--radius-full);
+		font-size: 9px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		flex-shrink: 0;
+		white-space: nowrap;
 	}
 
 	.room-item__badge {

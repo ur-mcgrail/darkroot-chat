@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { currentRoom, currentRoomId, typingUsers, matrixClient } from '$lib/stores/matrix';
-	import { getRoomName } from '$lib/matrix/rooms';
+	import { getRoomName, joinRoom, leaveRoom } from '$lib/matrix/rooms';
 	import { fetchRoomMessages, sendMessage } from '$lib/matrix/messages';
 	import { handleTyping, stopTyping } from '$lib/matrix/typing';
+	import { getRoomIcon } from '$lib/utils/roomIcons';
 	import MessageList from './MessageList.svelte';
 	import LinkSidebar from './LinkSidebar.svelte';
 	import RoomSettingsModal from './RoomSettingsModal.svelte';
@@ -17,6 +18,35 @@
 	let showLinkSidebar = true;
 	let showXWarning = false;
 	let showRoomSettings = false;
+
+	// Invite acceptance
+	let acceptingInvite = false;
+	let decliningInvite = false;
+	$: isInvited = $currentRoom?.getMyMembership() === 'invite';
+
+	async function handleAcceptInvite() {
+		if (!$currentRoom) return;
+		acceptingInvite = true;
+		try {
+			await joinRoom($currentRoom.roomId);
+		} catch (err) {
+			console.error('Failed to accept invite:', err);
+		} finally {
+			acceptingInvite = false;
+		}
+	}
+
+	async function handleDeclineInvite() {
+		if (!$currentRoom) return;
+		decliningInvite = true;
+		try {
+			await leaveRoom($currentRoom.roomId);
+		} catch (err) {
+			console.error('Failed to decline invite:', err);
+		} finally {
+			decliningInvite = false;
+		}
+	}
 
 	$: if (!showLinks) showLinkSidebar = false;
 
@@ -113,7 +143,32 @@
 </script>
 
 <div class="room-view">
-	{#if $currentRoom}
+	{#if $currentRoom && isInvited}
+		<!-- Invite Gate — shown when user has pending invite to this room -->
+		<div class="invite-gate">
+			<div class="invite-gate__icon" aria-hidden="true">
+				{@html getRoomIcon(roomName)}
+			</div>
+			<h2 class="invite-gate__title">{roomName}</h2>
+			<p class="invite-gate__text">You have been invited to join this chamber.</p>
+			<div class="invite-gate__actions">
+				<button
+					class="invite-gate__accept"
+					on:click={handleAcceptInvite}
+					disabled={acceptingInvite || decliningInvite}
+				>
+					{acceptingInvite ? 'Entering…' : 'Accept Invitation'}
+				</button>
+				<button
+					class="invite-gate__decline"
+					on:click={handleDeclineInvite}
+					disabled={acceptingInvite || decliningInvite}
+				>
+					{decliningInvite ? '…' : 'Decline'}
+				</button>
+			</div>
+		</div>
+	{:else if $currentRoom}
 		<!-- Room Header (spans full width including sidebar) -->
 		<div class="room-header">
 			<div class="room-header__info">
@@ -222,14 +277,33 @@
 			{#if showLinks}<LinkSidebar visible={showLinkSidebar} />{/if}
 		</div>
 	{:else}
-		<!-- No Room Selected -->
-		<div class="no-room">
+		<!-- No Room Selected — Fog Gate idle screen -->
+		<div class="no-room" aria-label="No chamber selected">
+			<div class="no-room__bg" aria-hidden="true"></div>
+			<div class="no-room__embers" aria-hidden="true">
+				<span class="nr-ember" style="--x:14%;  --d:0.00s; --dur:3.8s; --sz:1.5px; --drift:14px;"></span>
+				<span class="nr-ember" style="--x:28%;  --d:0.55s; --dur:4.4s; --sz:1.0px; --drift:-18px;"></span>
+				<span class="nr-ember" style="--x:43%;  --d:1.10s; --dur:3.5s; --sz:2.0px; --drift:10px;"></span>
+				<span class="nr-ember" style="--x:57%;  --d:0.30s; --dur:4.9s; --sz:1.2px; --drift:-12px;"></span>
+				<span class="nr-ember" style="--x:68%;  --d:1.70s; --dur:3.2s; --sz:1.8px; --drift:20px;"></span>
+				<span class="nr-ember" style="--x:80%;  --d:0.85s; --dur:4.1s; --sz:1.0px; --drift:-8px;"></span>
+				<span class="nr-ember" style="--x:35%;  --d:2.20s; --dur:3.7s; --sz:1.4px; --drift:16px;"></span>
+				<span class="nr-ember" style="--x:72%;  --d:1.40s; --dur:4.6s; --sz:1.1px; --drift:-22px;"></span>
+			</div>
 			<div class="no-room__content">
-				<h2>🌲 Darkroot Chat</h2>
-				<p>Select a room to start chatting</p>
-				<p class="no-room__hint">
-					or create a new room with the + button
-				</p>
+				<div class="no-room__bonfire">
+					<div class="no-room__pool"></div>
+					<img src="/emoji/bonfire.png" alt="" class="no-room__flame" aria-hidden="true" />
+				</div>
+				<p class="no-room__label">select a chamber</p>
+				<div class="no-room__ornament" aria-hidden="true">
+					<span class="no-room__ornament-line"></span>
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" fill="currentColor"
+						width="6" height="6" class="no-room__ornament-gem">
+						<path d="M6 0L7.5 4.5L12 6L7.5 7.5L6 12L4.5 7.5L0 6L4.5 4.5Z"/>
+					</svg>
+					<span class="no-room__ornament-line"></span>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -496,36 +570,249 @@
 		cursor: not-allowed;
 	}
 
-	/* No Room Selected */
+	/* ── Invite Gate ── */
+	.invite-gate {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-5);
+		background: var(--bg-deepest);
+		padding: var(--space-8);
+		text-align: center;
+	}
+
+	.invite-gate__icon {
+		width: 72px;
+		height: 72px;
+		border-radius: var(--radius-md);
+		background: var(--accent-gold-dim);
+		border: 1px solid var(--accent-gold);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--accent-gold-bright);
+		box-shadow: 0 0 24px rgba(150, 168, 92, 0.2);
+	}
+
+	.invite-gate__icon :global(svg) {
+		width: 36px;
+		height: 36px;
+	}
+
+	.invite-gate__title {
+		margin: 0;
+		font-size: var(--text-xl);
+		font-family: var(--font-display);
+		color: var(--accent-gold-bright);
+		letter-spacing: 0.04em;
+	}
+
+	.invite-gate__text {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--text-muted);
+		font-style: italic;
+	}
+
+	.invite-gate__actions {
+		display: flex;
+		gap: var(--space-3);
+		align-items: center;
+	}
+
+	.invite-gate__accept {
+		padding: var(--space-3) var(--space-6);
+		background: var(--accent-gold-dim);
+		border: 1px solid var(--accent-gold);
+		border-radius: var(--radius-md);
+		color: var(--accent-gold-bright);
+		font-weight: 700;
+		font-size: var(--text-sm);
+		font-family: var(--font-display);
+		letter-spacing: 0.04em;
+		cursor: pointer;
+		transition: all var(--transition-base);
+	}
+
+	.invite-gate__accept:hover:not(:disabled) {
+		background: var(--accent-gold);
+		color: var(--bg-deepest);
+		box-shadow: var(--shadow-glow-gold);
+	}
+
+	.invite-gate__accept:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.invite-gate__decline {
+		padding: var(--space-3) var(--space-4);
+		background: transparent;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		color: var(--text-dim);
+		font-size: var(--text-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.invite-gate__decline:hover:not(:disabled) {
+		border-color: rgba(211, 95, 95, 0.4);
+		color: var(--text-muted);
+	}
+
+	.invite-gate__decline:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	/* ── No Room Selected — Fog Gate idle screen ── */
 	.no-room {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		flex: 1;
+		background: var(--bg-deepest);
+		overflow: hidden;
+	}
+
+	.no-room__bg {
+		position: absolute;
+		inset: 0;
+		background: radial-gradient(
+			ellipse 60% 50% at 50% 58%,
+			rgba(79, 138, 97, 0.07) 0%,
+			rgba(79, 138, 97, 0.025) 45%,
+			transparent 72%
+		);
+		pointer-events: none;
+		animation: nrGlowBreathe 6s ease-in-out infinite alternate;
+	}
+
+	@keyframes nrGlowBreathe {
+		from { opacity: 0.6; transform: scaleY(0.92); }
+		to   { opacity: 1;   transform: scaleY(1.08); }
+	}
+
+	.no-room__embers {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+	}
+
+	.nr-ember {
+		position: absolute;
+		bottom: 52%;
+		left: var(--x);
+		width: var(--sz);
+		height: var(--sz);
+		border-radius: 50%;
+		background: var(--accent-gold-bright);
+		box-shadow: 0 0 3px 1px rgba(200, 216, 128, 0.4);
+		opacity: 0;
+		animation: nrEmberRise var(--dur) var(--d) infinite ease-out;
+	}
+
+	@keyframes nrEmberRise {
+		0%   { opacity: 0;    transform: translateY(0)      translateX(0);            }
+		8%   { opacity: 0.75;                                                          }
+		85%  { opacity: 0;    transform: translateY(-36vh)  translateX(var(--drift)); }
+		100% { opacity: 0;    transform: translateY(-38vh)  translateX(var(--drift)); }
 	}
 
 	.no-room__content {
-		text-align: center;
-		max-width: 400px;
+		position: relative;
+		z-index: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-5);
 	}
 
-	.no-room__content h2 {
-		margin: 0 0 var(--space-3) 0;
-		font-size: var(--text-4xl);
-		color: var(--accent-primary-bright);
+	.no-room__bonfire {
+		position: relative;
+		display: flex;
+		justify-content: center;
+		align-items: flex-end;
+		height: 108px;
+	}
+
+	.no-room__pool {
+		position: absolute;
+		bottom: 0;
+		left: 50%;
+		transform: translateX(-50%);
+		width: 130px;
+		height: 52px;
+		background: radial-gradient(
+			ellipse at 50% 100%,
+			rgba(200, 216, 128, 0.14) 0%,
+			rgba(150, 168, 92, 0.05) 52%,
+			transparent 72%
+		);
+		border-radius: 50%;
+		animation: nrPoolFlicker 4s ease-in-out infinite;
+	}
+
+	@keyframes nrPoolFlicker {
+		0%, 100% { opacity: 0.75; transform: translateX(-50%) scaleX(1);    }
+		28%      { opacity: 1;    transform: translateX(-50%) scaleX(1.07); }
+		55%      { opacity: 0.6;  transform: translateX(-50%) scaleX(0.93); }
+		78%      { opacity: 0.9;  transform: translateX(-50%) scaleX(1.04); }
+	}
+
+	.no-room__flame {
+		width: 96px;
+		height: 96px;
+		image-rendering: pixelated;
+		filter:
+			drop-shadow(0 0 7px  rgba(200, 216, 128, 0.60))
+			drop-shadow(0 0 20px rgba(150, 168, 92,  0.36))
+			drop-shadow(0 0 44px rgba(79,  138, 97,  0.18));
+		animation: nrFlameFlicker 4s ease-in-out infinite;
+	}
+
+	@keyframes nrFlameFlicker {
+		0%   { filter: drop-shadow(0 0 6px  rgba(200,216,128,0.55)) drop-shadow(0 0 18px rgba(150,168,92,0.32)) drop-shadow(0 0 36px rgba(79,138,97,0.16)); }
+		15%  { filter: drop-shadow(0 0 12px rgba(200,216,128,0.85)) drop-shadow(0 0 30px rgba(150,168,92,0.50)) drop-shadow(0 0 56px rgba(79,138,97,0.28)); }
+		38%  { filter: drop-shadow(0 0 4px  rgba(200,216,128,0.42)) drop-shadow(0 0 12px rgba(150,168,92,0.22)) drop-shadow(0 0 24px rgba(79,138,97,0.11)); }
+		60%  { filter: drop-shadow(0 0 10px rgba(200,216,128,0.78)) drop-shadow(0 0 26px rgba(150,168,92,0.45)) drop-shadow(0 0 48px rgba(79,138,97,0.24)); }
+		82%  { filter: drop-shadow(0 0 5px  rgba(200,216,128,0.48)) drop-shadow(0 0 14px rgba(150,168,92,0.26)) drop-shadow(0 0 28px rgba(79,138,97,0.13)); }
+		100% { filter: drop-shadow(0 0 6px  rgba(200,216,128,0.55)) drop-shadow(0 0 18px rgba(150,168,92,0.32)) drop-shadow(0 0 36px rgba(79,138,97,0.16)); }
+	}
+
+	.no-room__label {
+		margin: 0;
 		font-family: var(--font-display);
+		font-size: 11px;
+		font-variant: small-caps;
+		letter-spacing: 0.26em;
+		text-transform: lowercase;
+		color: var(--text-dim);
+		opacity: 0.7;
+		user-select: none;
 	}
 
-	.no-room__content p {
-		margin: var(--space-2) 0;
-		color: var(--text-secondary);
-		font-size: var(--text-lg);
+	.no-room__ornament {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 140px;
+		opacity: 0.28;
 	}
 
-	.no-room__hint {
-		color: var(--text-muted);
-		font-size: var(--text-sm);
-		font-style: italic;
+	.no-room__ornament-line {
+		flex: 1;
+		height: 1px;
+		background: var(--accent-gold);
+	}
+
+	.no-room__ornament-gem {
+		color: var(--accent-gold);
+		flex-shrink: 0;
 	}
 
 	/* ── X / Twitter Warning Modal ── */
