@@ -11,7 +11,13 @@
 		kickUser,
 		getRoomJoinRule,
 		canEditRoom,
+		setRoomAvatarFromUrl,
+		clearRoomAvatar,
+		inviteAllServerUsersToRoom,
 	} from '$lib/matrix/rooms';
+	import { DARKROOT_REACTIONS } from '$lib/matrix/reactions';
+	import { getRoomIcon } from '$lib/utils/roomIcons';
+	import { fetchMediaUrl } from '$lib/utils/media';
 
 	export let show = false;
 	export let room: sdk.Room | null = null;
@@ -29,6 +35,13 @@
 	let saveError = '';
 	let saveSuccess = false;
 
+	// Icon tab state
+	let selectedIconImage: string | null = null; // '/emoji/bonfire.png' or 'default' or null
+	let applyingIcon = false;
+	let iconError = '';
+	let iconSuccess = false;
+	let currentAvatarBlobUrl: string | null = null;
+
 	// Members tab state
 	let members: { userId: string; displayName: string; powerLevel: number }[] = [];
 	let allUsers: { name: string; displayname: string | null }[] = [];
@@ -36,6 +49,11 @@
 	let inviting = false;
 	let inviteError = '';
 	let kickingUserId = '';
+
+	// Invite-all state
+	let inviteAllRunning = false;
+	let inviteAllProgress: { attempted: number; total: number } | null = null;
+	let inviteAllResult: { invited: number; failed: string[] } | null = null;
 
 	// Permission check
 	let canEdit = false;
@@ -55,6 +73,16 @@
 
 		// Load general tab values
 		editName = room.name || '';
+		// Load current room avatar
+		const mxcUrl = room.getMxcAvatarUrl() || '';
+		if (mxcUrl && client) {
+			fetchMediaUrl(client, mxcUrl, 48, 48, 'crop').then(url => { currentAvatarBlobUrl = url; });
+		} else {
+			currentAvatarBlobUrl = null;
+		}
+		selectedIconImage = null;
+		iconError = '';
+		iconSuccess = false;
 		const topicEvent = room.currentState.getStateEvents('m.room.topic', '');
 		editTopic = topicEvent?.getContent()?.topic || '';
 		editJoinRule = getRoomJoinRule(room);
@@ -141,6 +169,26 @@
 		}
 	}
 
+	async function handleInviteAll() {
+		if (!room) return;
+		inviteAllRunning = true;
+		inviteAllProgress = null;
+		inviteAllResult = null;
+		try {
+			const result = await inviteAllServerUsersToRoom(room.roomId, (attempted, total) => {
+				inviteAllProgress = { attempted, total };
+			});
+			inviteAllResult = result;
+			// Refresh member list after a short delay
+			setTimeout(loadMembers, 800);
+		} catch (err: any) {
+			inviteAllResult = { invited: 0, failed: [err.message || 'Unknown error'] };
+		} finally {
+			inviteAllRunning = false;
+			inviteAllProgress = null;
+		}
+	}
+
 	// Filter users for invite: only non-joined, matching search
 	$: joinedIds = new Set(members.map(m => m.userId));
 	$: filteredUsers = allUsers.filter(u =>
@@ -150,6 +198,34 @@
 			u.name.toLowerCase().includes(inviteSearch.toLowerCase()) ||
 			(u.displayname || '').toLowerCase().includes(inviteSearch.toLowerCase()))
 	);
+
+	async function handleApplyIcon() {
+		if (!room) return;
+		applyingIcon = true;
+		iconError = '';
+		iconSuccess = false;
+		try {
+			if (selectedIconImage === 'default') {
+				await clearRoomAvatar(room.roomId);
+				currentAvatarBlobUrl = null;
+			} else if (selectedIconImage) {
+				await setRoomAvatarFromUrl(room.roomId, selectedIconImage);
+				// Brief delay then re-fetch to reflect new avatar
+				await new Promise(r => setTimeout(r, 600));
+				const updatedMxc = client?.getRoom(room.roomId)?.getMxcAvatarUrl() || '';
+				if (updatedMxc && client) {
+					currentAvatarBlobUrl = await fetchMediaUrl(client, updatedMxc, 48, 48, 'crop');
+				}
+			}
+			iconSuccess = true;
+			selectedIconImage = null;
+			setTimeout(() => { iconSuccess = false; }, 3000);
+		} catch (err: any) {
+			iconError = err.message || 'Failed to apply icon.';
+		} finally {
+			applyingIcon = false;
+		}
+	}
 
 	function handleClose() {
 		show = false;
@@ -266,6 +342,72 @@
 							{/if}
 						</div>
 
+						<!-- Room Icon Picker -->
+						<div class="form-group">
+							<label>Room Icon</label>
+							<div class="icon-preview-row">
+								<div class="icon-preview">
+									{#if selectedIconImage === 'default'}
+										{@html getRoomIcon(editName || room.name || '')}
+									{:else if selectedIconImage}
+										<img src={selectedIconImage} alt="Selected icon" class="icon-preview__img" />
+									{:else if currentAvatarBlobUrl}
+										<img src={currentAvatarBlobUrl} alt="Room icon" class="icon-preview__img" />
+									{:else}
+										{@html getRoomIcon(editName || room.name || '')}
+									{/if}
+								</div>
+								<p class="icon-preview__label">
+									{#if selectedIconImage === 'default'}
+										Auto-assigned (will reset on apply)
+									{:else if selectedIconImage}
+										{DARKROOT_REACTIONS.find(r => r.image === selectedIconImage)?.title ?? 'Selected'}
+									{:else if currentAvatarBlobUrl}
+										Custom icon set
+									{:else}
+										Auto-assigned
+									{/if}
+								</p>
+							</div>
+							{#if canEdit}
+								<div class="icon-picker">
+									<button
+										class="icon-picker__option"
+										class:selected={selectedIconImage === 'default'}
+										on:click={() => selectedIconImage = 'default'}
+										title="Reset to auto-assigned icon"
+									>
+										<div class="icon-picker__option-svg">
+											{@html getRoomIcon(editName || room.name || '')}
+										</div>
+										<span class="icon-picker__option-label">Default</span>
+									</button>
+									{#each DARKROOT_REACTIONS as reaction}
+										<button
+											class="icon-picker__option"
+											class:selected={selectedIconImage === reaction.image}
+											on:click={() => selectedIconImage = reaction.image}
+											title={reaction.title}
+										>
+											<img src={reaction.image} alt={reaction.label} class="icon-picker__option-img" />
+											<span class="icon-picker__option-label">{reaction.label}</span>
+										</button>
+									{/each}
+								</div>
+								{#if iconError}
+									<p class="save-error">⚠️ {iconError}</p>
+								{/if}
+								{#if iconSuccess}
+									<p class="save-success">✓ Icon applied</p>
+								{/if}
+								{#if selectedIconImage !== null}
+									<button class="btn-apply-icon" on:click={handleApplyIcon} disabled={applyingIcon}>
+										{applyingIcon ? 'Applying…' : 'Apply Icon'}
+									</button>
+								{/if}
+							{/if}
+						</div>
+
 						{#if canEdit}
 							<div class="save-row">
 								{#if saveError}
@@ -349,6 +491,44 @@
 									<p class="no-results">No users found matching "{inviteSearch}"</p>
 								{/if}
 							</div>
+						{/if}
+					</div>
+
+					<!-- Invite all -->
+					<div class="invite-all-section">
+						<div class="invite-all-row">
+							<div class="invite-all-info">
+								<span class="invite-all-label">Invite All Server Users</span>
+								<span class="invite-all-hint">Invite every active account on the server that hasn’t joined yet</span>
+							</div>
+							<button
+								class="btn-invite-all"
+								on:click={handleInviteAll}
+								disabled={inviteAllRunning}
+							>
+								{#if inviteAllRunning}
+									{#if inviteAllProgress}
+										{inviteAllProgress.attempted}/{inviteAllProgress.total}
+									{:else}
+										Loading…
+									{/if}
+								{:else}
+									Invite All
+								{/if}
+							</button>
+						</div>
+						{#if inviteAllResult}
+							<p class="invite-all-result">
+								{#if inviteAllResult.invited > 0}
+									✓ Invited {inviteAllResult.invited} user{inviteAllResult.invited !== 1 ? 's' : ''}
+								{/if}
+								{#if inviteAllResult.failed.length > 0}
+									<span class="invite-all-failed">· {inviteAllResult.failed.length} failed</span>
+								{/if}
+								{#if inviteAllResult.invited === 0 && inviteAllResult.failed.length === 0}
+									Everyone is already here
+								{/if}
+							</p>
 						{/if}
 					</div>
 				{/if}
@@ -792,5 +972,219 @@
 		font-style: italic;
 		text-align: center;
 		padding: var(--space-3);
+	}
+
+	/* ── Icon Picker ── */
+	.icon-preview-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+	}
+
+	.icon-preview {
+		width: 48px;
+		height: 48px;
+		border-radius: var(--radius-sm);
+		background: var(--accent-primary-dim);
+		border: 1px solid var(--border-default);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--accent-primary-bright);
+		flex-shrink: 0;
+		overflow: hidden;
+	}
+
+	.icon-preview :global(svg) {
+		width: 28px;
+		height: 28px;
+	}
+
+	.icon-preview__img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		image-rendering: pixelated;
+	}
+
+	.icon-preview__label {
+		margin: 0;
+		font-size: var(--text-xs);
+		color: var(--text-muted);
+		font-style: italic;
+	}
+
+	.icon-picker {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+		padding: var(--space-3);
+		background: var(--bg-surface);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-md);
+	}
+
+	.icon-picker__option {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 3px;
+		padding: var(--space-2);
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+		width: 56px;
+	}
+
+	.icon-picker__option:hover {
+		background: var(--bg-hover);
+		border-color: var(--border-default);
+	}
+
+	.icon-picker__option.selected {
+		background: var(--accent-primary-dim);
+		border-color: var(--accent-primary);
+		box-shadow: 0 0 0 1px var(--accent-primary);
+	}
+
+	.icon-picker__option-img {
+		width: 28px;
+		height: 28px;
+		object-fit: contain;
+		image-rendering: pixelated;
+	}
+
+	.icon-picker__option-svg {
+		width: 28px;
+		height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--accent-primary-bright);
+	}
+
+	.icon-picker__option-svg :global(svg) {
+		width: 22px;
+		height: 22px;
+	}
+
+	.icon-picker__option-label {
+		font-size: 9px;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.4px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 52px;
+		text-align: center;
+	}
+
+	.icon-picker__option.selected .icon-picker__option-label {
+		color: var(--accent-primary-bright);
+	}
+
+	.btn-apply-icon {
+		padding: var(--space-2) var(--space-4);
+		background: var(--accent-gold-dim);
+		border: 1px solid var(--accent-gold);
+		border-radius: var(--radius-md);
+		color: var(--accent-gold-bright);
+		font-weight: 600;
+		font-size: var(--text-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+		align-self: flex-start;
+	}
+
+	.btn-apply-icon:hover:not(:disabled) {
+		background: var(--accent-gold);
+		color: var(--bg-deepest);
+		box-shadow: var(--shadow-glow-gold);
+	}
+
+	.btn-apply-icon:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	/* Invite All */
+	.invite-all-section {
+		padding-top: var(--space-4);
+		border-top: 1px solid var(--border-subtle);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.invite-all-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+	}
+
+	.invite-all-info {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.invite-all-label {
+		font-size: var(--text-sm);
+		font-weight: 700;
+		color: var(--text-secondary);
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+
+	.invite-all-hint {
+		font-size: var(--text-xs);
+		color: var(--text-dim);
+		font-style: italic;
+	}
+
+	.btn-invite-all {
+		padding: var(--space-2) var(--space-4);
+		background: transparent;
+		border: 1px solid var(--accent-gold);
+		border-radius: var(--radius-md);
+		color: var(--accent-gold-bright);
+		font-weight: 700;
+		font-size: var(--text-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+		white-space: nowrap;
+		flex-shrink: 0;
+		min-width: 90px;
+		font-family: var(--font-mono);
+		letter-spacing: 0.02em;
+	}
+
+	.btn-invite-all:hover:not(:disabled) {
+		background: var(--accent-gold-dim);
+		box-shadow: var(--shadow-glow-gold);
+	}
+
+	.btn-invite-all:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.invite-all-result {
+		margin: 0;
+		font-size: var(--text-sm);
+		color: var(--accent-primary-bright);
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.invite-all-failed {
+		color: var(--text-muted);
+		font-size: var(--text-xs);
 	}
 </style>

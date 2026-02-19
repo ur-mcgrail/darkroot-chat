@@ -239,6 +239,47 @@ export async function kickUser(roomId: string, userId: string): Promise<void> {
 }
 
 /**
+ * Invite all active, non-guest server users to a room.
+ * Skips users who are already joined, deactivated, or guests.
+ * @param onProgress - called after each invite attempt with (attempted, total)
+ */
+export async function inviteAllServerUsersToRoom(
+	roomId: string,
+	onProgress?: (attempted: number, total: number) => void
+): Promise<{ invited: number; failed: string[] }> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+
+	const { listUsers } = await import('$lib/matrix/admin');
+	const allUsers = await listUsers();
+
+	const room = client.getRoom(roomId);
+	if (!room) throw new Error('Room not found');
+
+	const joinedIds = new Set(room.getJoinedMembers().map(m => m.userId));
+	const myId = client.getUserId();
+
+	const toInvite = allUsers.filter(
+		u => !u.deactivated && !u.is_guest && !joinedIds.has(u.name) && u.name !== myId
+	);
+
+	let invited = 0;
+	const failed: string[] = [];
+
+	for (let i = 0; i < toInvite.length; i++) {
+		try {
+			await client.invite(roomId, toInvite[i].name);
+			invited++;
+		} catch {
+			failed.push(toInvite[i].name);
+		}
+		onProgress?.(i + 1, toInvite.length);
+	}
+
+	return { invited, failed };
+}
+
+/**
  * List public rooms on the server (room directory)
  */
 export async function listPublicRooms(): Promise<{ roomId: string; name: string; topic: string; numMembers: number; avatarUrl: string | null }[]> {
@@ -255,6 +296,35 @@ export async function listPublicRooms(): Promise<{ roomId: string; name: string;
 		numMembers: room.num_joined_members || 0,
 		avatarUrl: room.avatar_url || null,
 	}));
+}
+
+/**
+ * Upload a static image (e.g. /emoji/bonfire.png) to Matrix media and set it
+ * as the room avatar.  Works with any URL the browser can fetch() — including
+ * same-origin /emoji/* paths served by the SvelteKit static dir.
+ */
+export async function setRoomAvatarFromUrl(roomId: string, imageUrl: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+
+	const response = await fetch(imageUrl);
+	if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
+	const blob = await response.blob();
+
+	// matrix-js-sdk uploadContent returns { content_uri } in most versions
+	const result: any = await client.uploadContent(blob, { type: blob.type });
+	const mxcUri: string = result?.content_uri ?? result;
+
+	await client.sendStateEvent(roomId, 'm.room.avatar', { url: mxcUri }, '');
+}
+
+/**
+ * Clear the room avatar state (resets display to the auto-assigned SVG icon).
+ */
+export async function clearRoomAvatar(roomId: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+	await client.sendStateEvent(roomId, 'm.room.avatar', { url: '' }, '');
 }
 
 /**
