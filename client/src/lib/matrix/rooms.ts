@@ -109,27 +109,133 @@ export async function joinRoom(roomIdOrAlias: string): Promise<sdk.Room> {
 }
 
 /**
- * Create a new room (public by default so all server users can find & join)
+ * Create a new room
+ * @param visibility 'public' (default) — discoverable, join freely; 'private' — invite only
  */
-export async function createRoom(name: string, topic?: string): Promise<sdk.Room> {
+export async function createRoom(name: string, topic?: string, visibility: 'public' | 'private' = 'public'): Promise<sdk.Room> {
 	const client = get(matrixClient);
 	if (!client) throw new Error('Matrix client not initialized');
+
+	const isPublic = visibility === 'public';
 
 	const result = await client.createRoom({
 		name,
 		topic,
-		visibility: 'public' as sdk.Visibility,
-		preset: 'public_chat' as sdk.Preset,
+		visibility: (isPublic ? 'public' : 'private') as sdk.Visibility,
+		preset: (isPublic ? 'public_chat' : 'private_chat') as sdk.Preset,
 		initial_state: [
 			{
 				type: 'm.room.history_visibility',
 				state_key: '',
-				content: { history_visibility: 'shared' },
+				content: { history_visibility: isPublic ? 'shared' : 'invited' },
 			},
+			...(isPublic ? [] : [{
+				type: 'm.room.join_rules',
+				state_key: '',
+				content: { join_rule: 'invite' },
+			}]),
 		],
 	});
 
 	return client.getRoom(result.room_id)!;
+}
+
+/**
+ * Auto-join the "General" public room if it exists and user isn't already in it
+ */
+export async function ensureGeneralRoom(): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) return;
+
+	try {
+		const publicRooms = await listPublicRooms();
+		const general = publicRooms.find(r => r.name.toLowerCase() === 'general');
+		if (!general) return;
+
+		// Check if already joined
+		const existing = client.getRoom(general.roomId);
+		if (existing && existing.getMyMembership() === 'join') return;
+
+		await joinRoom(general.roomId);
+		console.log('Auto-joined General room');
+	} catch (err) {
+		// Non-fatal — log and move on
+		console.warn('ensureGeneralRoom failed:', err);
+	}
+}
+
+/**
+ * Get the join rule for a room ('public' or 'invite')
+ */
+export function getRoomJoinRule(room: sdk.Room): 'public' | 'invite' {
+	const event = room.currentState.getStateEvents('m.room.join_rules', '');
+	const rule = event?.getContent()?.join_rule;
+	return rule === 'invite' ? 'invite' : 'public';
+}
+
+/**
+ * Check if the current user can edit room settings (power level >= 100 or via admin check)
+ */
+export function canEditRoom(room: sdk.Room, userId: string): boolean {
+	const member = room.getMember(userId);
+	return (member?.powerLevel ?? 0) >= 100;
+}
+
+/**
+ * Set room name
+ */
+export async function setRoomName(roomId: string, name: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+	await client.setRoomName(roomId, name);
+}
+
+/**
+ * Set room topic
+ */
+export async function setRoomTopic(roomId: string, topic: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+	await client.setRoomTopic(roomId, topic);
+}
+
+/**
+ * Set room join rules (and matching history visibility)
+ */
+export async function setRoomJoinRules(roomId: string, rule: 'public' | 'invite'): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+
+	await client.sendStateEvent(
+		roomId,
+		sdk.EventType.RoomJoinRules,
+		{ join_rule: rule === 'public' ? sdk.JoinRule.Public : sdk.JoinRule.Invite },
+		''
+	);
+	await client.sendStateEvent(
+		roomId,
+		sdk.EventType.RoomHistoryVisibility,
+		{ history_visibility: rule === 'public' ? sdk.HistoryVisibility.Shared : sdk.HistoryVisibility.Invited },
+		''
+	);
+}
+
+/**
+ * Invite a user to a room
+ */
+export async function inviteUser(roomId: string, userId: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+	await client.invite(roomId, userId);
+}
+
+/**
+ * Kick a user from a room
+ */
+export async function kickUser(roomId: string, userId: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+	await client.kick(roomId, userId);
 }
 
 /**

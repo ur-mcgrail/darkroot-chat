@@ -6,6 +6,7 @@
 
 	let roomName = '';
 	let roomTopic = '';
+	let roomVisibility: 'public' | 'private' = 'public';
 	let creating = false;
 	let error = '';
 
@@ -21,7 +22,7 @@
 		error = '';
 
 		try {
-			const room = await createRoom(roomName.trim(), roomTopic.trim() || undefined);
+			const room = await createRoom(roomName.trim(), roomTopic.trim() || undefined, roomVisibility);
 			console.log('Room created:', room.roomId);
 
 			// Reset form
@@ -42,6 +43,7 @@
 	function handleCancel() {
 		roomName = '';
 		roomTopic = '';
+		roomVisibility = 'public';
 		error = '';
 		show = false;
 		dispatch('cancel');
@@ -90,6 +92,38 @@
 						disabled={creating}
 						class="input"
 					/>
+				</div>
+
+				<!-- Visibility Toggle -->
+				<div class="form-group">
+					<label>Visibility</label>
+					<div class="visibility-toggle">
+						<button
+							type="button"
+							class="visibility-btn"
+							class:active={roomVisibility === 'public'}
+							on:click={() => roomVisibility = 'public'}
+							disabled={creating}
+						>
+							🌐 Public
+						</button>
+						<button
+							type="button"
+							class="visibility-btn"
+							class:active={roomVisibility === 'private'}
+							on:click={() => roomVisibility = 'private'}
+							disabled={creating}
+						>
+							🔒 Private
+						</button>
+					</div>
+					<p class="visibility-hint">
+						{#if roomVisibility === 'public'}
+							Discoverable by everyone — anyone can join freely.
+						{:else}
+							Hidden from room directory — invite only.
+						{/if}
+					</p>
 				</div>
 
 				<!-- Error Message -->
@@ -302,5 +336,51 @@
 		border: 1px solid var(--border-subtle);
 		font-family: var(--font-mono);
 		font-size: var(--text-xs);
+	}
+
+	.visibility-toggle {
+		display: flex;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-md);
+		overflow: hidden;
+	}
+
+	.visibility-btn {
+		flex: 1;
+		padding: var(--space-3);
+		background: var(--bg-base);
+		border: none;
+		color: var(--text-muted);
+		font-size: var(--text-sm);
+		font-weight: 500;
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.visibility-btn:first-child {
+		border-right: 1px solid var(--border-default);
+	}
+
+	.visibility-btn.active {
+		background: var(--accent-primary-dim);
+		color: var(--accent-primary-bright);
+		font-weight: 600;
+	}
+
+	.visibility-btn:hover:not(:disabled):not(.active) {
+		background: var(--bg-hover);
+		color: var(--text-secondary);
+	}
+
+	.visibility-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.visibility-hint {
+		margin: var(--space-1) 0 0 0;
+		font-size: var(--text-xs);
+		color: var(--text-muted);
+		font-style: italic;
 	}
 </style>

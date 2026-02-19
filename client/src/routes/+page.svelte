@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { isLoggedIn, currentUser, currentRoom, currentRoomId, rooms, userPresence, matrixClient } from '$lib/stores/matrix';
+	import { isLoggedIn, currentUser, currentRoom, currentRoomId, rooms, userPresence, matrixClient, syncState } from '$lib/stores/matrix';
 	import { logout } from '$lib/matrix/client';
 	import { goto } from '$app/navigation';
 	import { isServerAdmin } from '$lib/matrix/admin';
-	import { getRoomName } from '$lib/matrix/rooms';
+	import { getRoomName, ensureGeneralRoom } from '$lib/matrix/rooms';
 	import RoomList from '$lib/components/RoomList.svelte';
 	import RoomView from '$lib/components/RoomView.svelte';
 	import AdminPanel from '$lib/components/AdminPanel.svelte';
@@ -54,6 +54,13 @@
 				// ignore transient errors during room member enumeration
 			}
 		}
+	}
+
+	// Auto-join General room once client is synced
+	let generalJoinAttempted = false;
+	$: if ($syncState === 'PREPARED' && $isLoggedIn && !generalJoinAttempted) {
+		generalJoinAttempted = true;
+		ensureGeneralRoom();
 	}
 
 	onMount(async () => {
