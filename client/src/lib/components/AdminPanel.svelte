@@ -530,11 +530,10 @@
 										</div>
 										<div class="user-id">{user.name}</div>
 									</div>
-									{#if user.name !== currentUserId && !user.deactivated}
+									{#if user.name !== currentUserId && !user.deactivated && resetTarget?.name !== user.name}
 										<button
 											class="btn-secondary btn-sm"
 											on:click={() => startReset(user)}
-											disabled={resetting && resetTarget?.name === user.name}
 										>
 											Reset Password
 										</button>
