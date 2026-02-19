@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { isLoggedIn, currentUser, currentRoom, currentRoomId, rooms, userPresence, matrixClient, syncState } from '$lib/stores/matrix';
+	import { fly, fade } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
+	import { isLoggedIn, currentUser, currentRoom, currentRoomId, rooms, userPresence, matrixClient, syncState, highlightedLink } from '$lib/stores/matrix';
 	import { logout } from '$lib/matrix/client';
 	import { goto } from '$app/navigation';
 	import { isServerAdmin } from '$lib/matrix/admin';
@@ -15,12 +17,16 @@
 	let isAdmin = false;
 
 	// Mobile layout state
-	type MobileTab = 'chat' | 'rooms' | 'links' | 'profile';
+	type MobileTab = 'chat' | 'rooms' | 'profile';
 	let mobileTab: MobileTab = 'rooms';
 	let isMobile = false;
+	let linksDrawerOpen = false;
 
 	// Auto-switch to chat view when a room is selected on mobile
 	$: if ($currentRoomId && isMobile) mobileTab = 'chat';
+
+	// Badge tap in chat → open links drawer on mobile
+	$: if ($highlightedLink?.from === 'chat' && isMobile) linksDrawerOpen = true;
 
 	// Build online users list — recomputed only when presence changes (not every message)
 	let onlineUsers: { userId: string; displayName: string; presence: string }[] = [];
@@ -127,6 +133,12 @@
 				<span class="mobile-wordmark">Darkroot</span>
 			{/if}
 			<div class="mobile-header-actions">
+				<button class="mobile-icon-btn" on:click={() => linksDrawerOpen = true} title="Link Feed" aria-label="Open Link Feed">
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+						<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+						<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+					</svg>
+				</button>
 				{#if isAdmin}
 					<button class="mobile-icon-btn" on:click={() => showAdminPanel = true} title="Admin">⚙️</button>
 				{/if}
@@ -149,16 +161,8 @@
 				<RoomView showLinks={!isMobile} />
 			</div>
 
-			<!-- Link feed panel (mobile only) -->
+			<!-- Online users panel (mobile only) -->
 			{#if isMobile}
-				<div class="panel panel--full" class:panel--hidden={mobileTab !== 'links'}>
-					<div class="mobile-panel-header">Link Feed</div>
-					<div class="mobile-links-wrap">
-						<LinkSidebar visible={mobileTab === 'links'} />
-					</div>
-				</div>
-
-				<!-- Online users panel (mobile only) -->
 				<div class="panel panel--full" class:panel--hidden={mobileTab !== 'profile'}>
 					<div class="profile-panel">
 						<!-- Avatar -->
@@ -200,6 +204,37 @@
 			{/if}
 		</div>
 
+		<!-- ── Link feed drawer (mobile) ─────────────────────────────────── -->
+		{#if isMobile && linksDrawerOpen}
+			<div
+				class="links-backdrop"
+				on:click={() => linksDrawerOpen = false}
+				on:keydown={(e) => e.key === 'Escape' && (linksDrawerOpen = false)}
+				role="presentation"
+				transition:fade={{ duration: 200 }}
+			></div>
+			<div
+				class="links-drawer"
+				transition:fly={{ x: 340, duration: 280, easing: cubicOut }}
+			>
+				<div class="links-drawer__header">
+					<span class="links-drawer__title">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+						Link Feed
+					</span>
+					<button class="links-drawer__close" on:click={() => linksDrawerOpen = false} aria-label="Close">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+							<line x1="18" y1="6" x2="6" y2="18"/>
+							<line x1="6" y1="6" x2="18" y2="18"/>
+						</svg>
+					</button>
+				</div>
+				<div class="links-drawer__body">
+					<LinkSidebar visible={true} />
+				</div>
+			</div>
+		{/if}
+
 		<!-- ── Mobile bottom nav ──────────────────────────────────────────── -->
 		<nav class="bottom-nav">
 			<button class="nav-btn" class:nav-btn--active={mobileTab === 'chat'} on:click={() => setTab('chat')}>
@@ -215,14 +250,7 @@
 				</svg>
 				<span>Rooms</span>
 			</button>
-			<button class="nav-btn" class:nav-btn--active={mobileTab === 'links'} on:click={() => setTab('links')}>
-				<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-					<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-				</svg>
-				<span>Links</span>
-			</button>
-			<button class="nav-btn" class:nav-btn--active={mobileTab === 'profile'} on:click={() => setTab('profile')}>
+	<button class="nav-btn" class:nav-btn--active={mobileTab === 'profile'} on:click={() => setTab('profile')}>
 				<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 					<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
 					<circle cx="12" cy="7" r="4"/>
@@ -351,6 +379,9 @@
 		font-size: var(--text-xl);
 		cursor: pointer;
 		padding: var(--space-1);
+		color: var(--accent-primary-bright);
+		display: flex;
+		align-items: center;
 	}
 
 	/* ── Main layout ── */
@@ -534,23 +565,87 @@
 		border-color: var(--status-live);
 	}
 
-	/* ── Mobile link panel ── */
-	.mobile-panel-header {
-		padding: var(--space-3) var(--space-4);
-		font-size: var(--text-sm);
+	/* ── Link feed drawer (mobile) ── */
+	.links-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.55);
+		backdrop-filter: blur(2px);
+		z-index: 200;
+	}
+
+	.links-drawer {
+		position: fixed;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		width: 88vw;
+		max-width: 360px;
+		background: var(--bg-surface);
+		border-left: 1px solid var(--border-default);
+		box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+		z-index: 201;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.links-drawer__header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+		background: var(--bg-elevated);
+		border-bottom: 1px solid var(--border-default);
+		flex-shrink: 0;
+		min-height: 52px;
+	}
+
+	.links-drawer__title {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-family: var(--font-display);
+		font-size: 13px;
 		font-weight: 700;
-		color: var(--text-secondary);
+		color: var(--text-primary);
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		border-bottom: 1px solid var(--border-subtle);
+		letter-spacing: 0.05em;
+	}
+
+	.links-drawer__close {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		background: transparent;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-sm);
+		color: var(--text-muted);
+		cursor: pointer;
+		transition: all var(--transition-fast);
 		flex-shrink: 0;
 	}
 
-	.mobile-links-wrap {
+	.links-drawer__close:hover {
+		background: var(--bg-hover);
+		border-color: var(--accent-primary);
+		color: var(--text-primary);
+	}
+
+	.links-drawer__body {
 		flex: 1;
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
+	}
+
+	/* Make LinkSidebar fill the full drawer width */
+	.links-drawer__body :global(.link-feed) {
+		width: 100%;
+		min-width: 0;
+		border-left: none;
 	}
 
 	.loading-container {

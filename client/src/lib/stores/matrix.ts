@@ -51,3 +51,6 @@ export const userId = derived(
 	currentUser,
 	($currentUser) => $currentUser?.userId || null
 );
+
+// Cross-panel link highlighting: chat badge ↔ sidebar card
+export const highlightedLink = writable<{ id: string; ts: number; from: 'chat' | 'sidebar' } | null>(null);

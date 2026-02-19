@@ -1,11 +1,10 @@
 <script lang="ts">
-	import { afterUpdate, onMount } from 'svelte';
-	import { messages, matrixClient } from '$lib/stores/matrix';
+	import { afterUpdate } from 'svelte';
+	import { messages, matrixClient, highlightedLink } from '$lib/stores/matrix';
 	import { getMessageBody, getMessageType, isOwnMessage } from '$lib/matrix/messages';
 	import {
 		hasServiceLink,
 		extractAllServiceLinks,
-		getContextText,
 		displayUrl,
 		fetchLinkMeta,
 		LINK_SERVICES,
@@ -16,6 +15,7 @@
 
 	let scrollContainer: HTMLDivElement;
 	let shouldAutoScroll = true;
+	let linkCardEls: Record<string, HTMLElement> = {};
 
 	// Map of url → metadata (reactive)
 	let metaMap: Record<string, LinkMeta> = {};
@@ -51,7 +51,7 @@
 		return user?.displayName || userId.split(':')[0].substring(1);
 	}
 
-	// Format timestamp
+	// Format timestamp for sender strip
 	function formatTime(timestamp: number): string {
 		const date = new Date(timestamp);
 		const now = new Date();
@@ -59,19 +59,10 @@
 		const yesterday = new Date(now);
 		yesterday.setDate(yesterday.getDate() - 1);
 		const isYesterday = date.toDateString() === yesterday.toDateString();
-
-		const time = date.toLocaleTimeString('en-US', {
-			hour: 'numeric',
-			minute: '2-digit',
-			hour12: true,
-		});
-
+		const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 		if (isToday) return time;
 		if (isYesterday) return `Yesterday ${time}`;
-		return (
-			date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-			` ${time}`
-		);
+		return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ` ${time}`;
 	}
 
 	// Auto-scroll to bottom
@@ -85,6 +76,20 @@
 		if (!scrollContainer) return;
 		const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
 		shouldAutoScroll = scrollHeight - scrollTop - clientHeight < 80;
+	}
+
+	// Chat → sidebar: scroll to card and flash highlight
+	$: {
+		const hl = $highlightedLink;
+		if (hl?.from === 'chat' && scrollContainer) {
+			const el = linkCardEls[hl.id];
+			if (el) {
+				el.classList.remove('link-active');
+				void el.offsetHeight; // force reflow to restart animation
+				el.classList.add('link-active');
+				el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+			}
+		}
 	}
 </script>
 
@@ -105,7 +110,7 @@
 		<div class="link-feed__services">
 			{#each LINK_SERVICES as svc}
 				<span class="link-feed__service-chip" title={svc.label}>
-					{svc.icon}
+					{@html svc.svgIcon}
 				</span>
 			{/each}
 		</div>
@@ -124,31 +129,19 @@
 					</p>
 				</div>
 			{:else}
-				{#each linkMessages as message, i (message.id)}
+				{#each linkMessages as message (message.id)}
 					{@const isOwn = $matrixClient && isOwnMessage(message.sender, $matrixClient)}
 					{@const body = getMessageBody(message.content)}
-					{@const context = getContextText(body)}
 					{@const serviceLinks = extractAllServiceLinks(body)}
-					{@const prevMsg = i > 0 ? linkMessages[i - 1] : null}
-					{@const sameSender = prevMsg && prevMsg.sender === message.sender}
 
-					<div class="link-msg" class:link-msg--own={isOwn} class:link-msg--grouped={sameSender}>
-						<!-- Sender + time -->
-						{#if !sameSender}
-							<div class="link-msg__meta">
-								<span class="link-msg__sender" class:link-msg__sender--own={isOwn}>
-									{getDisplayName(message.sender)}
-								</span>
-								<span class="link-msg__time">{formatTime(message.timestamp)}</span>
-							</div>
-						{/if}
+					<div class="link-msg" class:link-msg--own={isOwn} bind:this={linkCardEls[message.id]}>
+						<!-- Sender strip — thin left bar + name + time -->
+						<div class="link-msg__sender-strip">
+							<span class="link-msg__sender-name">{getDisplayName(message.sender)}</span>
+							<span class="link-msg__sender-time">{formatTime(message.timestamp)}</span>
+						</div>
 
-						<!-- Context text -->
-						{#if context}
-							<p class="link-msg__context">{context}</p>
-						{/if}
-
-						<!-- Link cards with metadata -->
+						<!-- Link cards -->
 						{#each serviceLinks as { service, url }}
 							{@const meta = metaMap[url] || {}}
 							<a
@@ -157,7 +150,19 @@
 								target="_blank"
 								rel="noopener noreferrer"
 							>
-								<!-- Thumbnail (if available) -->
+								<div class="link-msg__card-body">
+									<div class="link-msg__card-header">
+										<span class="link-msg__card-icon">{@html service.svgIcon}</span>
+										<span class="link-msg__card-service">{service.label}</span>
+									</div>
+
+									{#if meta.title}
+										<span class="link-msg__card-title">{meta.title}</span>
+									{/if}
+
+									<span class="link-msg__card-url">{displayUrl(url)}</span>
+								</div>
+
 								{#if meta.thumbnail}
 									<div class="link-msg__thumb-wrap">
 										<img
@@ -169,31 +174,16 @@
 									</div>
 								{/if}
 
-								<div class="link-msg__card-body">
-									<div class="link-msg__card-header">
-										<span class="link-msg__card-icon">{service.icon}</span>
-										<span class="link-msg__card-service">{service.label}</span>
-									</div>
-
-									{#if meta.title}
-										<span class="link-msg__card-title">{meta.title}</span>
-									{/if}
-
-									{#if meta.author}
-										<span class="link-msg__card-author">by {meta.author}</span>
-									{/if}
-
-									<span class="link-msg__card-url">{displayUrl(url)}</span>
-								</div>
-
 								<span class="link-msg__card-arrow">→</span>
 							</a>
 						{/each}
 
-						<!-- Timestamp on grouped messages -->
-						{#if sameSender}
-							<div class="link-msg__time-inline">{formatTime(message.timestamp)}</div>
-						{/if}
+						<!-- Jump to chat (hover reveal) -->
+						<button
+							class="link-msg__jump"
+							on:click={() => highlightedLink.set({ id: message.id, ts: Date.now(), from: 'sidebar' })}
+							title="Jump to chat message"
+						>↑ chat</button>
 					</div>
 				{/each}
 			{/if}
@@ -203,8 +193,8 @@
 
 <style>
 	.link-feed {
-		width: 300px;
-		min-width: 300px;
+		width: 260px;
+		min-width: 260px;
 		display: flex;
 		flex-direction: column;
 		background: var(--bg-surface);
@@ -256,7 +246,7 @@
 		display: flex;
 		align-items: center;
 		gap: 5px;
-		padding: var(--space-1) var(--space-3);
+		padding: 2px var(--space-3);
 		border-bottom: 1px solid var(--border-default);
 		background: var(--bg-elevated);
 		flex-shrink: 0;
@@ -264,15 +254,22 @@
 	}
 
 	.link-feed__service-chip {
-		font-size: 11px;
-		opacity: 0.65;
+		display: inline-flex;
+		align-items: center;
+		opacity: 0.6;
 		cursor: default;
-		transition: opacity var(--transition-fast);
+		transition: opacity var(--transition-fast), transform var(--transition-fast);
+		color: var(--text-secondary);
+	}
+
+	.link-feed__service-chip :global(svg) {
+		width: 12px;
+		height: 12px;
 	}
 
 	.link-feed__service-chip:hover {
 		opacity: 1;
-		transform: scale(1.15);
+		transform: scale(1.2);
 	}
 
 	/* Messages area */
@@ -311,73 +308,103 @@
 		line-height: 1.5;
 	}
 
-	/* Individual link message */
+	/* Individual link message — left bar is the sender color cue */
 	.link-msg {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-1);
+		position: relative;
+		border-left: 2px solid var(--accent-primary);
+		padding-left: var(--space-2);
 	}
 
-	.link-msg--grouped {
-		margin-top: calc(-1 * var(--space-1));
+	.link-msg--own {
+		border-left-color: var(--accent-gold);
 	}
 
-	.link-msg__meta {
+	/* Jump-to-chat button (hover reveal, top-right corner) */
+	.link-msg__jump {
+		position: absolute;
+		top: 2px;
+		right: 0;
+		opacity: 0;
+		font-size: 10px;
+		padding: 1px 6px;
+		background: var(--bg-surface);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-full);
+		color: var(--accent-primary-bright);
+		cursor: pointer;
+		font-family: inherit;
+		font-weight: 600;
+		transition: opacity 0.15s;
+		z-index: 10;
+	}
+
+	.link-msg:hover .link-msg__jump {
+		opacity: 1;
+	}
+
+	.link-msg__jump:hover {
+		background: var(--accent-primary);
+		color: var(--text-primary);
+	}
+
+	/* Sidebar highlight — snaps in at 12% then fades */
+	@keyframes sidebarHighlight {
+		0%   { background: transparent;               outline: 2px solid transparent; outline-offset: 2px; }
+		12%  { background: rgba(108, 184, 130, 0.22); outline-color: var(--accent-primary-bright); }
+		100% { background: transparent;               outline-color: transparent; }
+	}
+
+	.link-msg.link-active {
+		animation: sidebarHighlight 1.4s ease-out forwards;
+		border-radius: var(--radius-sm);
+	}
+
+	/* Sender strip — thin left bar + name + time on one line */
+	.link-msg__sender-strip {
 		display: flex;
-		justify-content: space-between;
 		align-items: baseline;
 		gap: var(--space-2);
-		padding: 0 2px;
+		padding: 0 2px 2px 0;
 	}
 
-	.link-msg__sender {
-		font-size: 11px;
+	.link-msg__sender-name {
+		font-size: 10px;
 		font-weight: 700;
 		color: var(--accent-primary-bright);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
 
-	.link-msg__sender--own {
-		color: var(--accent-gold);
+	.link-msg--own .link-msg__sender-name {
+		color: var(--accent-gold-bright);
 	}
 
-	.link-msg__time {
+	.link-msg__sender-time {
 		font-size: 10px;
 		color: var(--text-dim);
 		white-space: nowrap;
 		flex-shrink: 0;
+		font-family: var(--font-mono);
 	}
 
-	.link-msg__time-inline {
-		font-size: 10px;
-		color: var(--text-dim);
-		padding: 0 2px;
-		text-align: right;
-	}
-
-	.link-msg__context {
-		margin: 0;
-		padding: var(--space-1) var(--space-2);
-		font-size: 12px;
-		color: var(--text-secondary);
-		line-height: 1.5;
-		background: var(--bg-base);
-		border-radius: var(--radius-sm);
-	}
-
-	/* Link card */
+	/* Link card — compact inline layout */
 	.link-msg__card {
 		display: flex;
-		flex-direction: column;
+		flex-direction: row;
+		align-items: stretch;
 		gap: 0;
-		background: var(--bg-base);
+		background: var(--bg-elevated);
 		border: 1px solid var(--border-default);
 		border-radius: var(--radius-md);
 		text-decoration: none;
 		color: var(--text-primary);
-		transition: all var(--transition-fast);
+		transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 		cursor: pointer;
 		overflow: hidden;
 		position: relative;
@@ -385,30 +412,34 @@
 
 	.link-msg__card:hover {
 		border-color: var(--accent-primary);
+		box-shadow: var(--shadow-card);
 	}
 
-	/* Thumbnail */
+	/* Card body (left side) */
+	.link-msg__card-body {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: var(--space-2);
+	}
+
+	/* Inline thumbnail (right side, 72×72) */
 	.link-msg__thumb-wrap {
-		width: 100%;
-		max-height: 140px;
+		width: 72px;
+		min-width: 72px;
+		border-left: 1px solid var(--border-subtle, var(--border-default));
+		border-radius: 0 var(--radius-md) var(--radius-md) 0;
 		overflow: hidden;
 		background: var(--bg-base);
 	}
 
 	.link-msg__thumb {
 		width: 100%;
-		height: auto;
+		height: 100%;
 		display: block;
 		object-fit: cover;
-		max-height: 140px;
-	}
-
-	/* Card body (below thumbnail) */
-	.link-msg__card-body {
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		padding: var(--space-2);
 	}
 
 	.link-msg__card-header {
@@ -418,8 +449,15 @@
 	}
 
 	.link-msg__card-icon {
-		font-size: 13px;
+		display: inline-flex;
+		align-items: center;
 		flex-shrink: 0;
+		color: var(--accent-gold-bright);
+	}
+
+	.link-msg__card-icon :global(svg) {
+		width: 13px;
+		height: 13px;
 	}
 
 	.link-msg__card-service {

@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount, afterUpdate } from 'svelte';
-	import { messages, matrixClient, userPresence, currentRoomId } from '$lib/stores/matrix';
+	import { messages, matrixClient, userPresence, currentRoomId, highlightedLink } from '$lib/stores/matrix';
 	import { marked } from 'marked';
 	import { getMessageBody, getMessageType, isOwnMessage } from '$lib/matrix/messages';
-	import { hasServiceLink, getContextText, extractAllServiceLinks, URL_REGEX } from '$lib/utils/links';
+	import { hasServiceLink, extractAllServiceLinks, URL_REGEX } from '$lib/utils/links';
 	import { fetchAvatarUrl, fetchMediaUrl } from '$lib/utils/media';
 	import { formatRelativeTime, formatFullTimestamp } from '$lib/utils/time';
 	import { DARKROOT_REACTIONS, toggleReaction, getMessageReactions } from '$lib/matrix/reactions';
@@ -26,25 +26,6 @@
 		gfm: true,
 	});
 
-	/**
-	 * For messages with service links, strip the URLs out and append a
-	 * "See Link Feed →" badge. Otherwise render normally.
-	 */
-	function renderBody(body: string, isLink: boolean): string {
-		if (!isLink) return marked.parse(body) as string;
-
-		const context = getContextText(body);
-		const links = extractAllServiceLinks(body);
-		const icons = links.map((l) => l.service.icon).join(' ');
-
-		let html = '';
-		if (context) {
-			html += marked.parse(context) as string;
-		}
-		html += `<span class="link-feed-badge">${icons} See Link Feed →</span>`;
-		return html;
-	}
-
 	afterUpdate(() => {
 		if (shouldAutoScroll && messageContainer) {
 			messageContainer.scrollTop = messageContainer.scrollHeight;
@@ -55,6 +36,20 @@
 		if (!messageContainer) return;
 		const { scrollTop, scrollHeight, clientHeight } = messageContainer;
 		shouldAutoScroll = scrollHeight - scrollTop - clientHeight < 100;
+	}
+
+	// Sidebar → chat: scroll to message and flash highlight
+	$: {
+		const hl = $highlightedLink;
+		if (hl?.from === 'sidebar' && messageContainer) {
+			const el = messageContainer.querySelector(`[data-msgid="${hl.id}"]`) as HTMLElement | null;
+			if (el) {
+				el.classList.remove('link-active');
+				void el.offsetHeight; // force reflow to restart animation
+				el.classList.add('link-active');
+				el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+			}
+		}
 	}
 
 	// Update relative timestamps every 30 seconds
@@ -149,6 +144,23 @@
 		}
 	}
 
+	/**
+	 * For messages that contain service links, replace each bare URL with a compact
+	 * inline icon-anchor (service SVG + target=_blank) before passing to marked.
+	 * This keeps the surrounding message text but swaps the ugly raw URL for a tiny icon.
+	 */
+	function renderBodyWithIconLinks(
+		body: string,
+		links: Array<{ service: { label: string; svgIcon: string }; url: string }>
+	): string {
+		let processed = body;
+		for (const { service, url } of links) {
+			const iconHtml = `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link-icon" title="${service.label}">${service.svgIcon}</a>`;
+			processed = processed.split(url).join(iconHtml);
+		}
+		return marked.parse(processed) as string;
+	}
+
 	function getDisplayName(userId: string): string {
 		if (!$matrixClient) return userId;
 		const user = $matrixClient.getUser(userId);
@@ -199,7 +211,7 @@
 			{@const prevMessage = i > 0 ? $messages[i - 1] : null}
 			{@const sameSenderAsPrev = prevMessage && prevMessage.sender === message.sender}
 
-			<div class="msg-row" class:msg-row--own={isOwn} class:msg-row--grouped={sameSenderAsPrev}>
+			<div class="msg-row" class:msg-row--own={isOwn} class:msg-row--grouped={sameSenderAsPrev} data-msgid={message.id}>
 				<!-- Avatar (only on first message in a group) -->
 				{#if !sameSenderAsPrev}
 					{@const avatarSrc = avatarUrls[message.sender]}
@@ -251,9 +263,33 @@
 					<!-- Body -->
 					<div class="msg-card__body">
 						{#if messageType === 'm.text'}
-							<div class="msg-card__text">
-								{@html renderBody(body, isLink)}
-							</div>
+							{#if isLink}
+								{@const links = extractAllServiceLinks(body)}
+								<div class="msg-card__text">{@html renderBodyWithIconLinks(body, links)}</div>
+								<button
+									class="link-feed-badge"
+									on:click={() => highlightedLink.set({ id: message.id, ts: Date.now(), from: 'chat' })}
+								>
+									{#each links as link}
+										<span class="link-feed-badge__icon">{@html link.service.svgIcon}</span>
+									{/each}
+									{#if links.length === 1}
+										See this {links[0].service.label} in the feed →
+									{:else}
+										See these links in the feed →
+									{/if}
+								</button>
+								{#each links as link}
+									<a
+										class="link-open-direct"
+										href={link.url}
+										target="_blank"
+										rel="noopener noreferrer"
+									>Open Directly <span class="link-open-direct__icon">{@html link.service.svgIcon}</span></a>
+								{/each}
+							{:else}
+								<div class="msg-card__text">{@html marked.parse(body)}</div>
+							{/if}
 						{:else if messageType === 'm.image'}
 							{@const imageSrc = mediaUrls[message.content.url]}
 							{#if imageSrc}
@@ -472,29 +508,29 @@
 		position: relative;
 	}
 
-	/* Received card */
+	/* Received card — elevated above the page bg so it has real depth */
 	.msg-card--received {
-		background: var(--bg-base);
+		background: var(--bg-elevated);
 		border: 1px solid var(--border-default);
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.15);
+		box-shadow: var(--shadow-card);
 	}
 
 	.msg-card--received:hover {
-		border-color: var(--border-strong, var(--text-dim));
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
+		border-color: var(--border-strong);
+		box-shadow: var(--shadow-card-hover);
 		transform: translateY(-1px);
 	}
 
-	/* Sent card */
+	/* Sent card — green tint makes it clearly "yours" */
 	.msg-card--sent {
-		background: var(--bg-base);
-		border: 1px solid var(--accent-primary-dim);
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.15);
+		background: rgba(47, 90, 58, 0.32);
+		border: 1px solid rgba(79, 138, 97, 0.38);
+		box-shadow: var(--shadow-card);
 	}
 
 	.msg-card--sent:hover {
 		border-color: var(--accent-primary);
-		box-shadow: 0 4px 14px rgba(74, 124, 89, 0.2), 0 2px 4px rgba(0, 0, 0, 0.2);
+		box-shadow: var(--shadow-card-hover), 0 0 12px rgba(79, 138, 97, 0.18);
 		transform: translateY(-1px);
 	}
 
@@ -505,14 +541,14 @@
 		justify-content: space-between;
 		gap: var(--space-3);
 		padding: var(--space-1) var(--space-3);
-		background: var(--bg-elevated);
+		background: var(--bg-surface);
 		border-bottom: 1px solid var(--border-default);
 		min-height: 28px;
 	}
 
 	.msg-card__header--own {
-		background: var(--accent-primary-dim);
-		border-bottom-color: var(--accent-primary);
+		background: rgba(47, 90, 58, 0.55);
+		border-bottom-color: rgba(79, 138, 97, 0.45);
 	}
 
 	.msg-card__sender {
@@ -600,6 +636,28 @@
 		text-decoration-color: var(--accent-gold);
 	}
 
+	/* Inline service icon links (replace raw URL text with platform icon) */
+	.msg-card__text :global(.msg-link-icon) {
+		display: inline-flex;
+		align-items: center;
+		color: var(--accent-gold-bright);
+		text-decoration: none;
+		opacity: 0.8;
+		vertical-align: middle;
+		padding: 0 1px;
+		transition: opacity var(--transition-fast), transform var(--transition-fast);
+	}
+
+	.msg-card__text :global(.msg-link-icon:hover) {
+		opacity: 1;
+		transform: scale(1.2);
+	}
+
+	.msg-card__text :global(.msg-link-icon svg) {
+		width: 15px;
+		height: 15px;
+	}
+
 	.msg-card__text :global(code) {
 		background: var(--bg-elevated);
 		padding: 1px 5px;
@@ -682,8 +740,8 @@
 		font-style: italic;
 	}
 
-	/* Link Feed badge */
-	.msg-card__text :global(.link-feed-badge) {
+	/* Link Feed badge (real button — triggers sidebar highlight) */
+	.link-feed-badge {
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
@@ -696,7 +754,78 @@
 		font-weight: 600;
 		color: var(--accent-primary-bright);
 		white-space: nowrap;
-		cursor: default;
+		cursor: pointer;
+		font-family: inherit;
+		transition: background var(--transition-fast), box-shadow var(--transition-fast);
+	}
+
+	.link-feed-badge:hover {
+		background: var(--accent-primary);
+		color: var(--text-primary);
+		box-shadow: 0 0 0 2px var(--accent-primary-bright);
+	}
+
+	.link-feed-badge__icon {
+		display: inline-flex;
+		align-items: center;
+	}
+
+	.link-feed-badge__icon :global(svg) {
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
+		vertical-align: middle;
+	}
+
+	/* Open Directly link — ghost pill, sits below the feed badge */
+	.link-open-direct {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		margin-top: 4px;
+		padding: 2px 10px;
+		background: transparent;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-full);
+		font-size: var(--text-xs);
+		font-weight: 500;
+		color: var(--text-secondary);
+		text-decoration: none;
+		font-family: inherit;
+		transition: border-color var(--transition-fast), color var(--transition-fast);
+	}
+
+	.link-open-direct + .link-open-direct {
+		margin-left: var(--space-1);
+	}
+
+	.link-open-direct:hover {
+		border-color: var(--accent-gold);
+		color: var(--accent-gold-bright);
+	}
+
+	.link-open-direct__icon {
+		display: inline-flex;
+		align-items: center;
+	}
+
+	.link-open-direct__icon :global(svg) {
+		width: 13px;
+		height: 13px;
+		flex-shrink: 0;
+		vertical-align: middle;
+	}
+
+	/* Chat highlight animation (triggered by sidebar → chat) */
+	@keyframes chatHighlight {
+		0%   { background: transparent;              box-shadow: none; }
+		12%  { background: rgba(108, 184, 130, 0.22); box-shadow: inset 0 0 0 2px var(--accent-primary-bright); }
+		100% { background: transparent;              box-shadow: none; }
+	}
+
+	:global(.msg-row.link-active) {
+		animation: chatHighlight 1.4s ease-out forwards;
+		border-radius: var(--radius-sm);
 	}
 
 	/* ── Reactions ── */

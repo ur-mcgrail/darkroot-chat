@@ -4,6 +4,7 @@
 	import { setCurrentRoom, getRoomName, getLastMessagePreview, getUnreadCount, listPublicRooms, joinRoom } from '$lib/matrix/rooms';
 	import { getClient } from '$lib/matrix/client';
 	import CreateRoomModal from './CreateRoomModal.svelte';
+	import { getRoomIcon } from '$lib/utils/roomIcons';
 	import type * as sdk from 'matrix-js-sdk';
 
 	let showCreateModal = false;
@@ -94,7 +95,7 @@
 				on:click={() => handleRoomClick(room.roomId)}
 			>
 				<div class="room-item__avatar">
-					{initial}
+					{@html getRoomIcon(roomName)}
 				</div>
 				<div class="room-item__content">
 					<div class="room-item__name">{roomName}</div>
@@ -118,7 +119,7 @@
 					disabled={joiningRoomId === pubRoom.roomId}
 				>
 					<div class="room-item__avatar room-item__avatar--discover">
-						{pubRoom.name.charAt(0).toUpperCase()}
+						{@html getRoomIcon(pubRoom.name)}
 					</div>
 					<div class="room-item__content">
 						<div class="room-item__name">{pubRoom.name}</div>
@@ -254,6 +255,20 @@
 		flex-shrink: 0;
 		font-size: var(--text-base);
 		text-transform: uppercase;
+	}
+
+	/* DS icon SVG sizing within the avatar square */
+	.room-item__avatar :global(svg) {
+		width: 22px;
+		height: 22px;
+		display: block;
+	}
+
+	/* Active room: shift avatar to gold to match the active name color */
+	.room-item.active .room-item__avatar {
+		color: var(--accent-gold-bright);
+		background: rgba(150, 168, 92, 0.15);
+		border-color: var(--accent-gold-soft);
 	}
 
 	.room-item__content {
