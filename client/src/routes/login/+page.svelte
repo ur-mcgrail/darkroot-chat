@@ -184,6 +184,9 @@
 			<a href="/register" class="card__footer-link">
 				Have an invitation? <em>Create an account →</em>
 			</a>
+			{#if import.meta.env.VITE_BUILD_VERSION}
+				<p class="card__version">{import.meta.env.VITE_BUILD_VERSION}</p>
+			{/if}
 		</footer>
 
 	</main>
@@ -698,6 +701,15 @@
 
 .card__footer-link:hover { color: var(--text-muted); }
 .card__footer-link:hover em { color: var(--accent-gold-bright); }
+
+.card__version {
+	margin: var(--space-3) 0 0;
+	font-size: 10px;
+	font-family: var(--font-mono);
+	color: var(--text-dim);
+	opacity: 0.45;
+	letter-spacing: 0.06em;
+}
 
 /* ═══════════════════════════════════════════
    MOBILE

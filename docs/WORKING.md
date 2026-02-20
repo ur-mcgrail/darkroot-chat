@@ -141,6 +141,13 @@ npm run dev -- --host 0.0.0.0 --port 5175
 | `typing.ts` | handleTyping(), stopTyping() |
 | `presence.ts` | setupPresenceListeners() |
 
+### Build Versioning
+The login page displays a build version stamp (`git-short-hash · YYYY-MM-DD`) in the footer.
+
+- **How it works**: `deploy.sh` writes `VITE_BUILD_VERSION` to `client/.env.local` before building. Vite embeds it at build time via `import.meta.env.VITE_BUILD_VERSION`. The `.env.local` file is deleted after the build and is gitignored.
+- **Where it shows**: Login page footer (only visible when `VITE_BUILD_VERSION` is set, i.e. production builds via `deploy.sh`; blank on local `npm run dev`).
+- **CSP hash auto-update**: `deploy.sh` also extracts the SHA-256 hash of SvelteKit's inline bootstrap script from `build/index.html` and updates `/etc/nginx/snippets/darkroot-security-headers.conf` on the VPS. This hash must match every build — the script handles it automatically.
+
 ### Known gotchas
 - **`pendingEventOrdering: Detached`** must be set in `createClient()` — without it, `redactEvent()` throws `"Cannot call getPendingEvents with pendingEventOrdering == chronological"`
 - **Read receipts**: never send for local echo events (IDs starting with `~`) — server returns 400
