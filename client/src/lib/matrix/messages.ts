@@ -85,7 +85,7 @@ export async function sendMessage(roomId: string, text: string): Promise<void> {
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
 const ALLOWED_FILE_TYPES  = new Set(['application/pdf', 'text/plain', 'application/zip',
 	'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;  // 10 MB
+const MAX_IMAGE_SIZE = 25 * 1024 * 1024;  // 25 MB
 const MAX_FILE_SIZE  = 50 * 1024 * 1024;  // 50 MB (matches nginx client_max_body_size)
 
 function sanitizeFilename(name: string): string {
@@ -103,7 +103,7 @@ export async function sendImage(roomId: string, file: File): Promise<void> {
 		throw new Error(`Unsupported image type: ${file.type}`);
 	}
 	if (file.size > MAX_IMAGE_SIZE) {
-		throw new Error(`Image too large (max 10 MB, got ${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+		throw new Error(`Image too large (max 25 MB, got ${(file.size / 1024 / 1024).toFixed(1)} MB)`);
 	}
 
 	const uploadResponse = await client.uploadContent(file);
