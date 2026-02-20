@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { currentRoom, currentRoomId, typingUsers, matrixClient } from '$lib/stores/matrix';
 	import { getRoomName, joinRoom, leaveRoom } from '$lib/matrix/rooms';
-	import { fetchRoomMessages, sendMessage } from '$lib/matrix/messages';
+	import { fetchRoomMessages, sendMessage, sendImage, sendFile } from '$lib/matrix/messages';
 	import { handleTyping, stopTyping } from '$lib/matrix/typing';
 	import { getRoomIcon } from '$lib/utils/roomIcons';
 	import { fetchMediaUrl } from '$lib/utils/media';
@@ -149,25 +149,38 @@
 		}
 	}
 
-	// File upload handler (future enhancement)
+	async function uploadFile(file: File) {
+		if (!$currentRoomId) return;
+		sending = true;
+		try {
+			if (file.type.startsWith('image/')) {
+				await sendImage($currentRoomId, file);
+			} else {
+				await sendFile($currentRoomId, file);
+			}
+		} catch (error) {
+			console.error('Failed to upload file:', error);
+			alert('Failed to send file. Please try again.');
+		} finally {
+			sending = false;
+		}
+	}
+
 	async function handleFileUpload(event: Event) {
 		const input = event.target as HTMLInputElement;
 		const file = input.files?.[0];
-
-		if (!file || !$currentRoomId) return;
-
-		// TODO: Implement file upload in next phase
-		console.log('File upload not yet implemented:', file.name);
+		if (!file) return;
+		input.value = ''; // reset so the same file can be re-selected
+		await uploadFile(file);
 	}
 
 	let isDragging = false;
 
-	function handleDropFile(e: DragEvent) {
+	async function handleDropFile(e: DragEvent) {
 		isDragging = false;
 		const file = e.dataTransfer?.files[0];
-		if (!file || !$currentRoomId) return;
-		// TODO: wire to upload when implemented
-		console.log('File dropped (upload not yet implemented):', file.name);
+		if (!file) return;
+		await uploadFile(file);
 	}
 </script>
 
