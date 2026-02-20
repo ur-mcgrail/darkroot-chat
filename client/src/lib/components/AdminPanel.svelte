@@ -316,7 +316,7 @@
 		<div class="modal-content" on:click|stopPropagation role="dialog" aria-modal="true">
 			<!-- Header -->
 			<div class="modal-header">
-				<h2>⚙️ Admin Panel</h2>
+				<h2><span class="path-dim">darkroot.chat.</span>admin</h2>
 				<button class="close-button" on:click={handleClose} aria-label="Close">×</button>
 			</div>
 
@@ -637,9 +637,15 @@
 
 	.modal-header h2 {
 		margin: 0;
-		font-size: var(--text-2xl);
-		font-family: var(--font-display);
+		font-size: 12px;
+		font-family: var(--font-mono);
+		letter-spacing: 0.02em;
 		color: var(--accent-primary-bright);
+	}
+
+	.modal-header h2 :global(.path-dim) {
+		color: var(--text-dim);
+		opacity: 0.6;
 	}
 
 	.close-button {

@@ -14,14 +14,31 @@ export interface Reaction {
 }
 
 /**
- * Darkroot-themed reactions (text-based, no emojis)
+ * Darkroot custom emoji pack — Dark Souls icons.
+ * Icons sourced from: https://github.com/Kahmul/DarkSoulsIcons (Downscaled_Icons/)
+ * Original artwork © FromSoftware. Icon sprites sourced from the Dark Souls wiki
+ * (fextralife.com) and compiled by github.com/Kahmul. Used for personal/non-commercial
+ * private chat decoration under fair use.
+ *
+ * `image` path is relative to the SvelteKit static/ directory.
  */
 export const DARKROOT_REACTIONS = [
-	{ key: 'Praise', label: 'Praise', title: 'Praise the sun!' },
-	{ key: 'Humanity', label: 'Humanity', title: 'Restore humanity' },
-	{ key: 'Estus', label: 'Estus', title: 'Take a swig' },
-	{ key: 'Bonfire', label: 'Bonfire', title: 'Rest at bonfire' }
+	{ key: 'Bonfire',  label: 'Bonfire',  title: 'Rest at the bonfire',              image: '/emoji/bonfire.png'         },
+	{ key: 'Estus',    label: 'Estus',    title: 'Take a swig of Estus',             image: '/emoji/estus.png'           },
+	{ key: 'Praise',   label: 'Praise',   title: 'Praise the Sun! \\\\[T]/',         image: '/emoji/sunlight_shield.png' },
+	{ key: 'Cursed',   label: 'Cursed',   title: 'You are cursed...',                image: '/emoji/darksign.png'        },
+	{ key: 'Kindled',  label: 'Kindled',  title: 'Rite of Kindling — fire grows',    image: '/emoji/rite_of_kindling.png'},
+	{ key: 'Sunlit',   label: 'Sunlit',   title: 'Sunlight Blade — ⚡ lightning',    image: '/emoji/sunlight_blade.png'  },
+	{ key: 'Lord',     label: 'Lord',     title: "Soul of Lord Gwyn",                image: '/emoji/gwyn_soul.png'       },
+	{ key: 'Bell',     label: 'Bell',     title: 'Ring the Bell of Awakening',       image: '/emoji/bell.png'            },
+	{ key: 'Havels',   label: "Havel's",  title: "Havel's Ring — no rolls allowed",  image: '/emoji/havels.png'          },
+	{ key: 'Homeward', label: 'GG',       title: 'Homeward Bone — going home',       image: '/emoji/homeward.png'        },
 ] as const;
+
+/** Look up DS emoji metadata by reaction key (for image rendering). */
+export function getDsEmoji(key: string) {
+	return DARKROOT_REACTIONS.find(r => r.key === key);
+}
 
 /**
  * Send a reaction to a message

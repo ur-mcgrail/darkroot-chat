@@ -7,7 +7,8 @@ import { get } from 'svelte/store';
 import { matrixClient, messages, currentRoomId, type Message } from '$lib/stores/matrix';
 
 /**
- * Fetch messages for a room and update store
+ * Fetch messages for a room and update store.
+ * Also sends a read receipt for the latest message so the unread badge clears.
  */
 export async function fetchRoomMessages(roomId: string): Promise<void> {
 	const client = get(matrixClient);
@@ -26,9 +27,17 @@ export async function fetchRoomMessages(roomId: string): Promise<void> {
 	const timeline = room.getLiveTimeline();
 	const events = timeline.getEvents();
 
-	// Filter to only message events and map to our format
+	// Filter to only message events and map to our format.
+	// Exclude redacted events and replacement events (edits) — the SDK automatically
+	// applies edits to the original event's content via event.getContent().
 	const messageEvents = events
-		.filter(event => event.getType() === 'm.room.message')
+		.filter(event => {
+			if (event.getType() !== 'm.room.message') return false;
+			if (event.isRedacted()) return false;
+			const relatesTo = event.getContent()['m.relates_to'];
+			if (relatesTo?.rel_type === 'm.replace') return false;
+			return true;
+		})
 		.map(event => ({
 			id: event.getId() || '',
 			sender: event.getSender() || '',
@@ -40,7 +49,15 @@ export async function fetchRoomMessages(roomId: string): Promise<void> {
 	// Update messages store
 	messages.set(messageEvents);
 
-	console.log(`Loaded ${messageEvents.length} messages for room ${roomId}`);
+	// Send a read receipt for the last confirmed server event in the timeline.
+	// Skip local echo events (IDs start with '~') — the server rejects receipts for them.
+	const lastConfirmedEvent = [...events].reverse().find(e => {
+		const id = e.getId();
+		return id && !id.startsWith('~');
+	});
+	if (lastConfirmedEvent) {
+		client.sendReadReceipt(lastConfirmedEvent).catch(() => {});
+	}
 }
 
 /**
@@ -145,6 +162,7 @@ export function setupMessageListeners(client: sdk.MatrixClient): void {
 		if (type === 'm.room.message') {
 			console.log('New message received:', event.getContent());
 			await fetchRoomMessages(room.roomId);
+			// fetchRoomMessages already sends the read receipt for us
 		} else if (type === 'm.reaction') {
 			// Reaction added — SDK has already updated room.relations by this point.
 			// Force a re-render so getMessageReactions() picks up the new reaction.
@@ -152,11 +170,11 @@ export function setupMessageListeners(client: sdk.MatrixClient): void {
 		}
 	});
 
-	// Listen for redactions (reaction removals also fire this)
+	// Listen for redactions — re-fetch so isRedacted() filtering removes the message
 	client.on(sdk.RoomEvent.Redaction, (_event, room) => {
 		const currentRoom = get(currentRoomId);
 		if (!room || room.roomId !== currentRoom) return;
-		messages.update(msgs => [...msgs]);
+		fetchRoomMessages(room.roomId);
 	});
 
 	console.log('Message listeners set up');
@@ -186,4 +204,36 @@ export function getMessageType(content: any): string {
  */
 export function isOwnMessage(senderId: string, client: sdk.MatrixClient): boolean {
 	return senderId === client.getUserId();
+}
+
+/**
+ * Edit a message by sending a replacement event (m.replace).
+ * The SDK will update the original event's content automatically on next sync.
+ */
+export async function editMessage(roomId: string, eventId: string, newText: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+
+	await client.sendMessage(roomId, {
+		msgtype: 'm.text',
+		body: `* ${newText}`,
+		'm.new_content': {
+			msgtype: 'm.text',
+			body: newText,
+		},
+		'm.relates_to': {
+			rel_type: 'm.replace',
+			event_id: eventId,
+		},
+	} as any);
+}
+
+/**
+ * Delete (redact) a message. Only works on messages sent by the current user.
+ */
+export async function deleteMessage(roomId: string, eventId: string): Promise<void> {
+	const client = get(matrixClient);
+	if (!client) throw new Error('Matrix client not initialized');
+
+	await client.redactEvent(roomId, eventId);
 }

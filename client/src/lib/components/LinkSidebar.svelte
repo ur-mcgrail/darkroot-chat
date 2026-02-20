@@ -98,8 +98,7 @@
 		<!-- Header -->
 		<div class="link-feed__header">
 			<span class="link-feed__title">
-				<span class="link-feed__title-icon">🔗</span>
-				Link Feed
+				darkroot.rooms
 			</span>
 			{#if linkMessages.length > 0}
 				<span class="link-feed__count">{linkMessages.length}</span>
@@ -226,10 +225,6 @@
 		font-family: var(--font-display);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-	}
-
-	.link-feed__title-icon {
-		font-size: 14px;
 	}
 
 	.link-feed__count {

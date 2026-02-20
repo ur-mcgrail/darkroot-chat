@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { rooms, currentRoomId, matrixClient } from '$lib/stores/matrix';
+	import { rooms, currentRoomId, matrixClient, userPresence } from '$lib/stores/matrix';
+	import { listUsers, type MatrixUser } from '$lib/matrix/admin';
 	import { setCurrentRoom, getRoomName, getLastMessagePreview, getUnreadCount, listPublicRooms, joinRoom } from '$lib/matrix/rooms';
-	import { getClient } from '$lib/matrix/client';
 	import CreateRoomModal from './CreateRoomModal.svelte';
 	import { getRoomIcon } from '$lib/utils/roomIcons';
 	import type * as sdk from 'matrix-js-sdk';
@@ -35,13 +35,29 @@
 	let discoverableRooms: { roomId: string; name: string; topic: string; numMembers: number }[] = [];
 	let joiningRoomId: string | null = null;
 
+	// Server users fetched from Synapse admin API (authoritative, same source as admin panel)
+	let serverUsers: MatrixUser[] = [];
+
+	async function refreshUsers() {
+		if (!$matrixClient) return;
+		try {
+			const myId = $matrixClient.getUserId();
+			const all = await listUsers();
+			serverUsers = all.filter(u => !u.deactivated && u.name !== myId);
+		} catch (err) {
+			console.warn('Failed to load users:', err);
+		}
+	}
+
 	// Load discoverable rooms on mount and when joined rooms change
 	onMount(() => {
 		loadDiscoverableRooms();
+		refreshUsers();
 	});
 
 	$: if ($rooms) {
 		loadDiscoverableRooms();
+		refreshUsers();
 		if ($matrixClient) {
 			for (const room of $rooms) ensureRoomAvatar(room);
 		}
@@ -76,11 +92,6 @@
 		setCurrentRoom(roomId);
 	}
 
-	function getRoomInitial(room: sdk.Room): string {
-		const name = getRoomName(room);
-		return name.charAt(0).toUpperCase();
-	}
-
 	function handleCreateRoom() {
 		showCreateModal = true;
 	}
@@ -89,13 +100,22 @@
 		const { room } = event.detail;
 		setCurrentRoom(room.roomId);
 	}
+
+	$: onlineUsers  = serverUsers.filter(u => ($userPresence[u.name] || 'offline') === 'online');
+	$: offlineUsers = serverUsers.filter(u => ($userPresence[u.name] || 'offline') !== 'online');
+
+	function getUserDisplayName(user: MatrixUser): string {
+		return user.displayname || user.name.split(':')[0].substring(1);
+	}
 </script>
 
 <div class="room-list">
 	<!-- Header -->
 	<div class="room-list__header">
-		<h2 class="room-list__title">Darkroot</h2>
-		<button class="room-list__add-button" on:click={handleCreateRoom} title="Create Room">+</button>
+		<h2 class="room-list__title">
+			<span class="path-dim">darkroot.chat.</span>rooms
+		</h2>
+		<button class="room-list__add-button" on:click={handleCreateRoom} title="darkroot.chat.rooms.new">+</button>
 	</div>
 
 	<!-- Rooms -->
@@ -114,7 +134,7 @@
 			{@const unreadCount = getUnreadCount(room)}
 			{@const lastMessage = getLastMessagePreview(room)}
 			{@const roomName = getRoomName(room)}
-			{@const initial = getRoomInitial(room)}
+			{@const memberCount = room.getJoinedMemberCount()}
 
 			<button
 				class="room-item"
@@ -131,8 +151,15 @@
 				</div>
 				<div class="room-item__content">
 					<div class="room-item__name">{roomName}</div>
-					<div class="room-item__preview">
-						{#if isInvited}You have been invited{:else}{lastMessage}{/if}
+					<div class="room-item__preview-row">
+						<span class="room-item__preview">
+							{#if isInvited}You have been invited{:else}{lastMessage}{/if}
+						</span>
+						{#if !isInvited}
+							<span class="room-item__members" title="{memberCount} {memberCount === 1 ? 'member' : 'members'}">
+								{memberCount}
+							</span>
+						{/if}
 					</div>
 				</div>
 				{#if isInvited}
@@ -171,6 +198,40 @@
 			{/each}
 		{/if}
 	</div>
+
+	<!-- User List — darkroot.chat.users -->
+	<div class="user-list">
+		<div class="user-list__header">
+			<span class="user-list__title"><span class="path-dim">darkroot.chat.</span>users</span>
+			{#if onlineUsers.length > 0}
+				<span class="user-list__online-count">{onlineUsers.length} online</span>
+			{/if}
+		</div>
+		<div class="user-list__entries">
+			{#if serverUsers.length === 0}
+				<p class="user-list__empty">no souls detected</p>
+			{:else}
+				{#each onlineUsers as user (user.name)}
+					<button class="user-item" title="Messages from Beyond — coming soon">
+						<div class="user-item__avatar">
+							<span class="user-item__initial">{getUserDisplayName(user).charAt(0).toUpperCase()}</span>
+							<div class="user-item__presence user-item__presence--online"></div>
+						</div>
+						<span class="user-item__name">{getUserDisplayName(user)}</span>
+					</button>
+				{/each}
+				{#each offlineUsers as user (user.name)}
+					<button class="user-item user-item--offline" title="Messages from Beyond — coming soon">
+						<div class="user-item__avatar">
+							<span class="user-item__initial">{getUserDisplayName(user).charAt(0).toUpperCase()}</span>
+							<div class="user-item__presence user-item__presence--offline"></div>
+						</div>
+						<span class="user-item__name">{getUserDisplayName(user)}</span>
+					</button>
+				{/each}
+			{/if}
+		</div>
+	</div>
 </div>
 
 <!-- Create Room Modal -->
@@ -183,7 +244,7 @@
 		width: 280px;
 		background: var(--bg-elevated);
 		border-right: 1px solid var(--border-default);
-		overflow-y: auto;
+		overflow: hidden; /* inner sections handle their own scroll */
 		flex-shrink: 0;
 		height: 100%;
 	}
@@ -199,11 +260,18 @@
 	}
 
 	.room-list__title {
-		font-size: var(--text-lg);
-		font-weight: 700;
+		font-size: 11px;
+		font-weight: 600;
 		color: var(--accent-primary-bright);
-		font-family: var(--font-display);
+		font-family: var(--font-mono);
+		letter-spacing: 0.02em;
 		margin: 0;
+	}
+
+	/* Shared path-prefix dim style */
+	:global(.path-dim) {
+		color: var(--text-dim);
+		opacity: 0.6;
 	}
 
 	.room-list__add-button {
@@ -334,13 +402,30 @@
 		color: var(--accent-primary-bright);
 	}
 
+	.room-item__preview-row {
+		display: flex;
+		align-items: baseline;
+		gap: var(--space-2);
+		margin-top: 2px;
+		min-width: 0;
+	}
+
 	.room-item__preview {
 		font-size: var(--text-xs);
 		color: var(--text-muted);
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		margin-top: 2px;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.room-item__members {
+		flex-shrink: 0;
+		font-size: 10px;
+		font-family: var(--font-mono);
+		color: var(--text-dim);
+		opacity: 0.7;
 	}
 
 	/* Invited rooms — gold tint */
@@ -425,5 +510,142 @@
 		background: var(--accent-primary-dim);
 		color: var(--accent-primary-bright);
 		border-color: var(--accent-primary);
+	}
+
+	/* ── User List (darkroot.users) ── */
+	.user-list {
+		flex-shrink: 0;
+		border-top: 1px solid var(--border-default);
+		background: var(--bg-surface);
+		display: flex;
+		flex-direction: column;
+		max-height: 180px;
+	}
+
+	.user-list__header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: var(--space-2) var(--space-3) var(--space-1);
+		flex-shrink: 0;
+	}
+
+	.user-list__title {
+		font-size: 10px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--text-dim);
+		font-family: var(--font-mono);
+	}
+
+	.user-list__online-count {
+		background: rgba(74, 222, 128, 0.12);
+		color: #4ade80;
+		border: 1px solid rgba(74, 222, 128, 0.25);
+		font-size: 9px;
+		padding: 0 5px;
+		border-radius: var(--radius-full);
+		font-weight: 700;
+		font-family: var(--font-mono);
+	}
+
+	.user-list__entries {
+		overflow-y: auto;
+		padding: 0 var(--space-2) var(--space-2);
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+	}
+
+	.user-list__empty {
+		font-size: var(--text-xs);
+		color: var(--text-dim);
+		font-style: italic;
+		padding: var(--space-1) var(--space-2);
+		margin: 0;
+	}
+
+	.user-item {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-1) var(--space-2);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: background var(--transition-fast);
+		background: transparent;
+		border: none;
+		text-align: left;
+		width: 100%;
+	}
+
+	.user-item:hover {
+		background: var(--bg-hover);
+	}
+
+	.user-item--offline {
+		opacity: 0.4;
+	}
+
+	.user-item__avatar {
+		width: 24px;
+		height: 24px;
+		min-width: 24px;
+		border-radius: var(--radius-full);
+		background: var(--accent-primary-dim);
+		border: 1px solid rgba(79, 138, 97, 0.25);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		position: relative;
+		flex-shrink: 0;
+	}
+
+	.user-item--offline .user-item__avatar {
+		background: var(--bg-elevated);
+		border-color: var(--border-subtle);
+	}
+
+	.user-item__initial {
+		font-size: 10px;
+		font-weight: 700;
+		color: var(--accent-primary-bright);
+		line-height: 1;
+	}
+
+	.user-item--offline .user-item__initial {
+		color: var(--text-dim);
+	}
+
+	.user-item__presence {
+		position: absolute;
+		bottom: -1px;
+		right: -1px;
+		width: 7px;
+		height: 7px;
+		border-radius: var(--radius-full);
+		border: 1.5px solid var(--bg-surface);
+	}
+
+	.user-item__presence--online  { background: #4ade80; }
+	.user-item__presence--offline { background: #4b5563; }
+
+	.user-item__name {
+		font-size: var(--text-xs);
+		color: var(--text-secondary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex: 1;
+		min-width: 0;
+	}
+
+	.user-item:hover .user-item__name {
+		color: var(--text-primary);
+	}
+
+	.user-item--offline .user-item__name {
+		color: var(--text-dim);
 	}
 </style>

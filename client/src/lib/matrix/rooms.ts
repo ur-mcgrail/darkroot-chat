@@ -29,6 +29,11 @@ export function setupRoomListeners(client: sdk.MatrixClient) {
 		updateRoomList(client);
 	});
 
+	// Update when read receipts change so unread badges re-render
+	client.on(sdk.RoomEvent.Receipt, (_event: sdk.MatrixEvent, _room: sdk.Room) => {
+		updateRoomList(client);
+	});
+
 	// Initial room list update
 	updateRoomList(client);
 }

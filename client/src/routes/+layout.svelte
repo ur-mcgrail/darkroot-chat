@@ -17,6 +17,15 @@
 	}
 
 	onMount(async () => {
+		// Auto-reload when a new service worker takes control (i.e. after a deploy).
+		// Without this, the page keeps running old JS bundles until the user manually
+		// refreshes, because Workbox's autoUpdate only swaps the SW — not the page.
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.addEventListener('controllerchange', () => {
+				window.location.reload();
+			});
+		}
+
 		try {
 			// Attempt to restore session from localStorage
 			const restored = await restoreSession();

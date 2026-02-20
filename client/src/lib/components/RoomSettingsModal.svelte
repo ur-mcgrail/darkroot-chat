@@ -247,7 +247,7 @@
 		<div class="modal-content" on:click|stopPropagation role="dialog" aria-modal="true" aria-label="Room Settings">
 			<!-- Header -->
 			<div class="modal-header">
-				<h2>Room Settings</h2>
+				<h2><span class="path-dim">darkroot.chat.rooms.</span>settings</h2>
 				<button class="close-btn" on:click={handleClose} aria-label="Close">×</button>
 			</div>
 
@@ -574,9 +574,15 @@
 
 	.modal-header h2 {
 		margin: 0;
-		font-size: var(--text-xl);
-		font-family: var(--font-display);
+		font-size: 12px;
+		font-family: var(--font-mono);
+		letter-spacing: 0.02em;
 		color: var(--accent-primary-bright);
+	}
+
+	.modal-header h2 :global(.path-dim) {
+		color: var(--text-dim);
+		opacity: 0.6;
 	}
 
 	.close-btn {

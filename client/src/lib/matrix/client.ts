@@ -62,6 +62,9 @@ export function createClient(homeserverUrl: string, accessToken?: string, userId
 		baseUrl: homeserverUrl,
 		accessToken,
 		userId,
+		// Required for redactEvent() — default 'chronological' mode throws when
+		// trying to access pending events during redaction.
+		pendingEventOrdering: sdk.PendingEventOrdering.Detached,
 	});
 
 	// Set up event listeners

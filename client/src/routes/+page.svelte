@@ -6,7 +6,7 @@
 	import { logout } from '$lib/matrix/client';
 	import { goto } from '$app/navigation';
 	import { isServerAdmin } from '$lib/matrix/admin';
-	import { getRoomName, ensureGeneralRoom } from '$lib/matrix/rooms';
+	import { getRoomName, ensureGeneralRoom, setCurrentRoom } from '$lib/matrix/rooms';
 	import RoomList from '$lib/components/RoomList.svelte';
 	import RoomView from '$lib/components/RoomView.svelte';
 	import AdminPanel from '$lib/components/AdminPanel.svelte';
@@ -69,6 +69,33 @@
 		ensureGeneralRoom();
 	}
 
+	// Auto-resume: restore last used room (or default to The Bonfire) after sync
+	let resumeAttempted = false;
+	$: if ($syncState === 'PREPARED' && $isLoggedIn && $rooms.length > 0 && !resumeAttempted) {
+		resumeAttempted = true;
+		autoResumeRoom();
+	}
+
+	// Persist the active room so we can restore it on next login
+	$: if ($currentRoomId) {
+		try { localStorage.setItem('darkroot_lastRoomId', $currentRoomId); } catch {}
+	}
+
+	function autoResumeRoom() {
+		if ($currentRoomId) return; // already selected (e.g. URL deep-link)
+		// 1. Resume last used room if still joined
+		try {
+			const lastId = localStorage.getItem('darkroot_lastRoomId');
+			if (lastId && $rooms.find(r => r.roomId === lastId)) {
+				setCurrentRoom(lastId);
+				return;
+			}
+		} catch {}
+		// 2. Fallback: The Bonfire
+		const bonfire = $rooms.find(r => /bonfire/i.test(r.name));
+		if (bonfire) setCurrentRoom(bonfire.roomId);
+	}
+
 	onMount(async () => {
 		if ($isLoggedIn) isAdmin = await isServerAdmin();
 
@@ -97,26 +124,39 @@
 
 		<!-- ── Desktop top bar ────────────────────────────────────────────── -->
 		<div class="top-bar">
-			<div class="top-bar__user">
-				<span class="top-bar__username">{$currentUser.userId}</span>
+			<!-- Left: wordmark -->
+			<div class="top-bar__brand">
+				<img src="/emoji/bonfire.png" alt="" class="top-bar__brand-icon" aria-hidden="true" />
+				<span class="top-bar__wordmark">Darkroot</span>
 			</div>
-			<div class="top-bar__actions">
-				{#if isAdmin}
-					<button class="top-bar__btn" on:click={() => showAdminPanel = true} title="Admin Panel">⚙️</button>
-				{/if}
-				<button class="top-bar__btn" on:click={handleSettings} title="Settings">
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<circle cx="12" cy="12" r="3"/>
-						<path d="M12 1v6m0 6v6M5 5l4 4m6 6l4 4M1 12h6m6 0h6M5 19l4-4m6-6l4-4"/>
-					</svg>
-				</button>
-				<button class="top-bar__btn" on:click={handleLogout} title="Logout">
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-						<polyline points="16 17 21 12 16 7"/>
-						<line x1="21" y1="12" x2="9" y2="12"/>
-					</svg>
-				</button>
+			<!-- Right: display name + actions -->
+			<div class="top-bar__right">
+				<span class="top-bar__username">
+					{$matrixClient?.getUser($currentUser.userId)?.displayName || $currentUser.userId.split(':')[0].substring(1)}
+				</span>
+				<div class="top-bar__actions">
+					{#if isAdmin}
+						<button class="top-bar__btn" on:click={() => showAdminPanel = true} title="Admin Panel">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<circle cx="12" cy="12" r="3"/>
+								<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+							</svg>
+						</button>
+					{/if}
+					<button class="top-bar__btn" on:click={handleSettings} title="Settings">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<circle cx="12" cy="12" r="3"/>
+							<path d="M12 1v6m0 6v6M5 5l4 4m6 6l4 4M1 12h6m6 0h6M5 19l4-4m6-6l4-4"/>
+						</svg>
+					</button>
+					<button class="top-bar__btn" on:click={handleLogout} title="Logout">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+							<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+							<polyline points="16 17 21 12 16 7"/>
+							<line x1="21" y1="12" x2="9" y2="12"/>
+						</svg>
+					</button>
+				</div>
 			</div>
 		</div>
 
@@ -130,7 +170,10 @@
 				</button>
 				<span class="mobile-title">{$currentRoom ? getRoomName($currentRoom) : 'Chat'}</span>
 			{:else}
-				<span class="mobile-wordmark">Darkroot</span>
+				<div class="mobile-brand">
+				<img src="/emoji/bonfire.png" alt="" class="mobile-brand__icon" aria-hidden="true" />
+				<span class="mobile-brand__wordmark">Darkroot</span>
+			</div>
 			{/if}
 			<div class="mobile-header-actions">
 				<button class="mobile-icon-btn" on:click={() => linksDrawerOpen = true} title="Link Feed" aria-label="Open Link Feed">
@@ -280,49 +323,84 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: var(--space-3) var(--space-4);
-		background: var(--bg-surface);
-		border-bottom: 1px solid var(--border-default);
+		padding: 0 var(--space-4);
+		background: var(--bg-deepest);
+		border-bottom: 1px solid var(--border-subtle);
 		flex-shrink: 0;
-		height: 56px;
+		height: 48px;
 	}
 
-	.top-bar__user {
+	.top-bar__brand {
 		display: flex;
 		align-items: center;
-		gap: var(--space-2);
+		gap: 8px;
+	}
+
+	.top-bar__brand-icon {
+		width: 16px;
+		height: 16px;
+		image-rendering: pixelated;
+		opacity: 0.82;
+		filter:
+			drop-shadow(0 0 3px rgba(200, 216, 128, 0.55))
+			drop-shadow(0 0 7px rgba(150, 168, 92, 0.30));
+	}
+
+	.top-bar__wordmark {
+		font-family: var(--font-display);
+		font-size: 11px;
+		font-variant: small-caps;
+		letter-spacing: 0.22em;
+		text-transform: lowercase;
+		color: var(--accent-gold);
+		user-select: none;
+	}
+
+	.top-bar__right {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
 	}
 
 	.top-bar__username {
-		font-size: var(--text-sm);
-		color: var(--text-secondary);
-		font-weight: 500;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--text-dim);
+		letter-spacing: 0.03em;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 200px;
 	}
 
 	.top-bar__actions {
 		display: flex;
 		align-items: center;
-		gap: var(--space-2);
+		gap: 2px;
 	}
 
 	.top-bar__btn {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: var(--space-2);
+		width: 32px;
+		height: 32px;
+		padding: 0;
 		background: transparent;
-		border: 1px solid var(--border-default);
+		border: none;
 		border-radius: var(--radius-sm);
-		color: var(--text-muted);
+		color: var(--text-dim);
 		cursor: pointer;
-		font-size: var(--text-base);
-		transition: all var(--transition-fast);
+		transition: color var(--transition-base), background var(--transition-base);
 	}
 
 	.top-bar__btn:hover {
-		background: var(--bg-hover);
-		color: var(--text-secondary);
-		border-color: var(--accent-primary);
+		color: var(--accent-primary-bright);
+		background: rgba(79, 138, 97, 0.08);
+	}
+
+	.top-bar__btn:active {
+		background: rgba(79, 138, 97, 0.14);
 	}
 
 	/* ── Mobile header ── */
@@ -331,10 +409,10 @@
 		align-items: center;
 		gap: var(--space-2);
 		padding: 0 var(--space-3);
-		background: var(--bg-surface);
-		border-bottom: 1px solid var(--border-default);
+		background: var(--bg-deepest);
+		border-bottom: 1px solid var(--border-subtle);
 		flex-shrink: 0;
-		height: 52px;
+		height: 48px;
 	}
 
 	.mobile-back {
@@ -348,12 +426,31 @@
 		border-radius: var(--radius-sm);
 	}
 
-	.mobile-wordmark {
-		font-family: var(--font-display);
-		font-size: var(--text-xl);
-		color: var(--accent-primary-bright);
-		letter-spacing: 0.05em;
+	.mobile-brand {
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		flex: 1;
+	}
+
+	.mobile-brand__icon {
+		width: 16px;
+		height: 16px;
+		image-rendering: pixelated;
+		opacity: 0.82;
+		filter:
+			drop-shadow(0 0 3px rgba(200, 216, 128, 0.55))
+			drop-shadow(0 0 7px rgba(150, 168, 92, 0.30));
+	}
+
+	.mobile-brand__wordmark {
+		font-family: var(--font-display);
+		font-size: 11px;
+		font-variant: small-caps;
+		letter-spacing: 0.22em;
+		text-transform: lowercase;
+		color: var(--accent-gold);
+		user-select: none;
 	}
 
 	.mobile-title {

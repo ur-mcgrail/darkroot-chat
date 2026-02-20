@@ -265,7 +265,7 @@
 </script>
 
 <svelte:head>
-	<title>Account - Darkroot Chat</title>
+	<title>darkroot.chat.user.settings</title>
 </svelte:head>
 
 <div class="account-page">
@@ -276,7 +276,7 @@
 			<!-- Back button -->
 			<button class="back-btn" on:click={handleBack}>
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-				Back to Chat
+				<span class="path-dim">darkroot.chat.</span>rooms
 			</button>
 
 			<!-- Profile Hero -->
@@ -339,7 +339,7 @@
 
 			<!-- Display Name -->
 			<section class="section">
-				<h2 class="section__title">Display Name</h2>
+				<h2 class="section__title"><span class="path-dim">user.settings.</span>display-name</h2>
 				<p class="section__desc">This is how other users see you in chat. Max {MAX_NAME_LENGTH} characters.</p>
 
 				<form class="form" on:submit|preventDefault={handleChangeDisplayName}>
@@ -382,7 +382,7 @@
 
 			<!-- Password -->
 			<section class="section">
-				<h2 class="section__title">Change Password</h2>
+				<h2 class="section__title"><span class="path-dim">user.settings.</span>password</h2>
 				<p class="section__desc">Keep your account secure with a strong password.</p>
 
 				<form class="form" on:submit|preventDefault={handleChangePassword}>
@@ -458,10 +458,17 @@
 		border: 1px solid var(--border-default);
 		padding: var(--space-2) var(--space-3);
 		border-radius: var(--radius-md);
-		color: var(--text-secondary);
+		color: var(--accent-primary-bright);
 		cursor: pointer;
-		font-size: var(--text-xs);
+		font-size: 11px;
+		font-family: var(--font-mono);
+		letter-spacing: 0.02em;
 		transition: all var(--transition-fast);
+	}
+
+	.back-btn :global(.path-dim) {
+		color: var(--text-dim);
+		opacity: 0.6;
 	}
 
 	.back-btn:hover {
@@ -610,9 +617,16 @@
 
 	.section__title {
 		margin: 0 0 var(--space-1) 0;
-		font-size: var(--text-base);
-		font-weight: 700;
-		color: var(--text-primary);
+		font-size: 11px;
+		font-weight: 600;
+		font-family: var(--font-mono);
+		letter-spacing: 0.02em;
+		color: var(--accent-primary-bright);
+	}
+
+	.section__title :global(.path-dim) {
+		color: var(--text-dim);
+		opacity: 0.6;
 	}
 
 	.section__desc {

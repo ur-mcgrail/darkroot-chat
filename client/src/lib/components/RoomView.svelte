@@ -8,6 +8,7 @@
 	import MessageList from './MessageList.svelte';
 	import LinkSidebar from './LinkSidebar.svelte';
 	import RoomSettingsModal from './RoomSettingsModal.svelte';
+	import StatsPanel from './StatsPanel.svelte';
 
 	// When false, the link panel and its toggle button are hidden (e.g. on mobile)
 	export let showLinks = true;
@@ -18,6 +19,7 @@
 	let showLinkSidebar = true;
 	let showXWarning = false;
 	let showRoomSettings = false;
+	let showStats = false;
 
 	// Invite acceptance
 	let acceptingInvite = false;
@@ -54,7 +56,7 @@
 	const X_LINK_REGEX = /https?:\/\/(www\.)?(twitter\.com|x\.com)\/[^\s]+/i;
 
 	$: roomName = $currentRoom ? getRoomName($currentRoom) : '';
-	$: memberCount = $currentRoom ? $currentRoom.getJoinedMemberCount() : 0;
+	$: roomTopic = $currentRoom?.currentState.getStateEvents('m.room.topic', '')?.getContent()?.topic || '';
 
 	// Load messages when room changes
 	$: if ($currentRoomId) {
@@ -140,6 +142,16 @@
 		// TODO: Implement file upload in next phase
 		console.log('File upload not yet implemented:', file.name);
 	}
+
+	let isDragging = false;
+
+	function handleDropFile(e: DragEvent) {
+		isDragging = false;
+		const file = e.dataTransfer?.files[0];
+		if (!file || !$currentRoomId) return;
+		// TODO: wire to upload when implemented
+		console.log('File dropped (upload not yet implemented):', file.name);
+	}
 </script>
 
 <div class="room-view">
@@ -172,17 +184,32 @@
 		<!-- Room Header (spans full width including sidebar) -->
 		<div class="room-header">
 			<div class="room-header__info">
-				<div class="room-header__avatar">
-					{roomName.charAt(0).toUpperCase()}
+				<div class="room-header__icon" aria-hidden="true">
+					{@html getRoomIcon(roomName)}
 				</div>
 				<div class="room-header__details">
 					<h2 class="room-header__name">{roomName}</h2>
-					<p class="room-header__subtitle">
-						{memberCount} {memberCount === 1 ? 'member' : 'members'}
-					</p>
+					{#if roomTopic}
+						<p class="room-header__topic">{roomTopic}</p>
+					{:else}
+						<p class="room-header__topic room-header__topic--empty">no description — set one in room settings</p>
+					{/if}
 				</div>
 			</div>
 			<div class="room-header__actions">
+				<!-- Stats -->
+				<button
+					class="room-header__action-btn"
+					class:active={showStats}
+					on:click={() => showStats = !showStats}
+					title="Chamber statistics"
+				>
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<line x1="18" y1="20" x2="18" y2="10"/>
+						<line x1="12" y1="20" x2="12" y2="4"/>
+						<line x1="6" y1="20" x2="6" y2="14"/>
+					</svg>
+				</button>
 				<!-- Room settings gear -->
 				<button
 					class="room-header__action-btn"
@@ -213,9 +240,26 @@
 		<!-- Chat body + Link sidebar -->
 		<div class="room-body">
 			<!-- Main chat column -->
-			<div class="room-body__chat">
+			<div
+				class="room-body__chat"
+				on:dragover|preventDefault={() => isDragging = true}
+				on:dragleave|self={() => isDragging = false}
+				on:drop|preventDefault={handleDropFile}
+			>
 				<!-- Message List -->
 				<MessageList />
+
+				<!-- Drag overlay -->
+				{#if isDragging}
+					<div class="drag-overlay" aria-hidden="true">
+						<div class="drag-overlay__icon">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+							</svg>
+						</div>
+						<span class="drag-overlay__text">drop to attach</span>
+					</div>
+				{/if}
 
 				<!-- Typing Indicators -->
 				{#if $typingUsers.length > 0}
@@ -245,36 +289,47 @@
 						</div>
 					</div>
 				{/if}
-
-				<!-- Message Input -->
-				<div class="message-input">
-					<textarea
-						bind:this={textareaElement}
-						bind:value={messageText}
-						on:keydown={handleKeyDown}
-						on:input={handleInput}
-						class="message-input__textarea"
-						placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
-						disabled={sending}
-						rows="1"
-					></textarea>
-					<div class="message-input__actions">
-						<div class="message-input__tools">
-							<!-- File upload button (placeholder for now) -->
-						</div>
-						<button
-							class="message-input__send-button"
-							on:click={handleSendMessage}
-							disabled={sending || !messageText.trim()}
-						>
-							{sending ? 'Sending...' : 'Send'}
-						</button>
-					</div>
-				</div>
 			</div>
 
 			<!-- Link Sidebar -->
 			{#if showLinks}<LinkSidebar visible={showLinkSidebar} />{/if}
+		</div>
+
+		<!-- Message Input — full width beneath chat + sidebar -->
+		<div class="message-input">
+			<input
+				type="file"
+				id="file-input-hidden"
+				style="display:none"
+				on:change={handleFileUpload}
+			/>
+			<button
+				class="message-input__attach"
+				on:click={() => document.getElementById('file-input-hidden')?.click()}
+				title="Attach file"
+				disabled={sending}
+			>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+					<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+				</svg>
+			</button>
+			<textarea
+				bind:this={textareaElement}
+				bind:value={messageText}
+				on:keydown={handleKeyDown}
+				on:input={handleInput}
+				class="message-input__textarea"
+				placeholder="speak into the dark…"
+				disabled={sending}
+				rows="2"
+			></textarea>
+			<button
+				class="message-input__send-button"
+				on:click={handleSendMessage}
+				disabled={sending || !messageText.trim()}
+			>
+				{sending ? '…' : 'Send'}
+			</button>
 		</div>
 	{:else}
 		<!-- No Room Selected — Fog Gate idle screen -->
@@ -307,6 +362,9 @@
 			</div>
 		</div>
 	{/if}
+
+	<!-- Stats Panel -->
+	<StatsPanel bind:show={showStats} room={$currentRoom} />
 
 	<!-- Room Settings Modal -->
 	<RoomSettingsModal bind:show={showRoomSettings} room={$currentRoom} />
@@ -351,33 +409,39 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: var(--space-4);
+		padding: var(--space-3) var(--space-4);
 		background: var(--bg-elevated);
 		border-bottom: 1px solid var(--border-default);
 		flex-shrink: 0;
+		gap: var(--space-3);
 	}
 
 	.room-header__info {
 		display: flex;
 		align-items: center;
 		gap: var(--space-3);
+		min-width: 0;
+		flex: 1;
 	}
 
-	.room-header__avatar {
-		width: 40px;
-		height: 40px;
-		border-radius: var(--radius-sm);
-		background: var(--accent-primary-dim);
+	.room-header__icon {
+		flex-shrink: 0;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		font-weight: 700;
 		color: var(--accent-primary-bright);
-		font-size: var(--text-base);
+		opacity: 0.85;
+	}
+
+	.room-header__icon :global(svg) {
+		width: 28px;
+		height: 28px;
+		display: block;
 	}
 
 	.room-header__details {
 		flex: 1;
+		min-width: 0;
 	}
 
 	.room-header__name {
@@ -386,12 +450,24 @@
 		font-weight: 700;
 		color: var(--text-primary);
 		font-family: var(--font-display);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
-	.room-header__subtitle {
-		margin: 2px 0 0 0;
+	.room-header__topic {
+		margin: 1px 0 0 0;
 		font-size: var(--text-xs);
 		color: var(--text-muted);
+		font-style: italic;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.room-header__topic--empty {
+		color: var(--text-dim);
+		opacity: 0.55;
 	}
 
 	.room-header__actions {
@@ -438,6 +514,48 @@
 		flex: 1;
 		min-width: 0; /* allow shrinking */
 		overflow: hidden;
+		position: relative; /* for drag overlay */
+	}
+
+	/* Drag-and-drop overlay */
+	.drag-overlay {
+		position: absolute;
+		inset: var(--space-2);
+		border: 2px dashed var(--accent-primary);
+		border-radius: var(--radius-md);
+		background: rgba(47, 90, 58, 0.07);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-3);
+		z-index: 50;
+		pointer-events: none;
+		color: var(--accent-primary-bright);
+		animation: dragPulse 1.4s ease-in-out infinite;
+	}
+
+	@keyframes dragPulse {
+		0%, 100% { border-color: var(--accent-primary);        opacity: 0.85; }
+		50%       { border-color: var(--accent-primary-bright); opacity: 1;    }
+	}
+
+	.drag-overlay__icon {
+		width: 40px;
+		height: 40px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		opacity: 0.75;
+	}
+
+	.drag-overlay__text {
+		font-size: var(--text-xs);
+		font-family: var(--font-display);
+		letter-spacing: 0.12em;
+		text-transform: lowercase;
+		font-variant: small-caps;
+		opacity: 0.9;
 	}
 
 	/* Typing Indicator */
@@ -496,29 +614,60 @@
 		font-style: italic;
 	}
 
-	/* Message Input */
+	/* Message Input — full-width dock at bottom of room-view */
 	.message-input {
 		display: flex;
-		flex-direction: column;
-		padding: var(--space-4);
-		background: var(--bg-elevated);
-		border-top: 1px solid var(--border-default);
+		flex-direction: row; /* override lordran-ui global which sets column */
+		align-items: flex-end;
 		gap: var(--space-2);
+		padding: var(--space-3) var(--space-4);
+		background: var(--bg-surface);
+		border-top: 1px solid var(--border-default);
 		flex-shrink: 0;
+		width: 100%; /* belt-and-suspenders: stretch across the full room-view width */
+	}
+
+	/* Attach file button */
+	.message-input__attach {
+		flex-shrink: 0;
+		width: 36px;
+		height: 36px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: transparent;
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-sm);
+		color: var(--text-dim);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.message-input__attach:hover:not(:disabled) {
+		background: var(--bg-hover);
+		border-color: var(--border-default);
+		color: var(--text-muted);
+	}
+
+	.message-input__attach:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
 	}
 
 	.message-input__textarea {
-		min-height: 44px;
+		flex: 1;
+		min-width: 0;
+		min-height: 48px;
 		max-height: 200px;
-		padding: var(--space-3);
+		padding: var(--space-2);
 		background: var(--bg-base);
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-sm);
 		color: var(--text-primary);
 		font-family: var(--font-body);
-		font-size: var(--text-base);
+		font-size: var(--text-sm);
 		resize: none;
-		transition: border-color var(--transition-fast);
+		transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 		line-height: 1.5;
 	}
 
@@ -535,38 +684,36 @@
 
 	.message-input__textarea::placeholder {
 		color: var(--text-dim);
-	}
-
-	.message-input__actions {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.message-input__tools {
-		display: flex;
-		gap: var(--space-2);
+		font-style: italic;
+		font-size: var(--text-xs);
 	}
 
 	.message-input__send-button {
-		padding: var(--space-3) var(--space-5);
-		background: var(--accent-primary);
-		border: 1px solid var(--accent-primary-bright);
-		border-radius: var(--radius-md);
-		color: var(--text-primary);
-		font-weight: 600;
+		flex-shrink: 0;
+		height: 36px;
+		padding: 0 var(--space-5);
+		background: rgba(47, 90, 58, 0.45);
+		border: 1px solid var(--accent-primary);
+		border-radius: var(--radius-sm);
+		color: var(--accent-primary-bright);
+		font-weight: 700;
 		cursor: pointer;
-		font-size: var(--text-sm);
+		font-size: var(--text-xs);
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		font-family: var(--font-display);
 		transition: all var(--transition-fast);
+		white-space: nowrap;
 	}
 
 	.message-input__send-button:hover:not(:disabled) {
-		background: var(--accent-primary-bright);
+		background: var(--accent-primary);
+		color: var(--text-primary);
 		box-shadow: var(--shadow-glow-green);
 	}
 
 	.message-input__send-button:disabled {
-		opacity: 0.5;
+		opacity: 0.3;
 		cursor: not-allowed;
 	}
 
