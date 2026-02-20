@@ -1,387 +1,259 @@
-# Darkroot Production Deployment Guide
+# Darkroot — Production Deployment
 
-**Status**: Deployed to VPS (2026-02-12)
-**URL**: `http://chat.warrenmcgrail.com` (pending DNS + SSL)
+**Live URL**: `https://chat.warrenmcgrail.com` (SSL via Let's Encrypt)
 **VPS IP**: `15.204.89.177`
+**VPS access**: `ssh vps` from lordran-home (jumpbox)
+**Synapse version**: pinned at `v1.147.0` in `docker-compose.prod.yml`
 
-## Architecture (Production)
+---
 
-The VPS uses the **host nginx** (not a Docker nginx container) for SSL termination and static file serving:
+## Production Architecture
 
 ```
-Internet → Host nginx (80/443) → Static files at /opt/darkroot/client/build/
-                                → Proxy /_matrix/* to localhost:8008 (Synapse container)
-                                → Proxy /_synapse/* to localhost:8008 (Admin API)
+Internet (443)
+    ↓
+Host nginx on VPS  (/etc/nginx/sites-enabled/chat.warrenmcgrail.com)
+    ├── Static SPA → /opt/darkroot/client/build/
+    ├── /_matrix/* → proxy → localhost:8008  (Synapse)
+    └── /_synapse/* → proxy → localhost:8008  (Synapse Admin API)
+
+Docker containers on VPS:
+    darkroot-postgres-prod  (postgres:16-alpine)
+    darkroot-redis-prod     (redis:7-alpine)
+    darkroot-synapse-prod   (matrixdotorg/synapse:v1.147.0)
+
+No nginx container — host nginx handles SSL and static files directly.
+No .env.prod file — values are in docker-compose.prod.yml directly.
 ```
 
-Docker services: PostgreSQL, Redis, Synapse (exposed on `127.0.0.1:8008` only)
-Nginx config: `/etc/nginx/sites-enabled/chat.warrenmcgrail.com`
-Frontend: `/opt/darkroot/client/build/` (SvelteKit static SPA)
+---
 
-## Prerequisites
+## Standard Deploy (Frontend Changes)
 
-1. **VPS Access** — direct SSH or via lordran-home jumpbox
-   ```bash
-   ssh vps 'echo Connected'
-   ```
-
-2. **Domain DNS** pointed to VPS IP
-   - `chat.warrenmcgrail.com` → `15.204.89.177`
-
-3. **Environment File** configured on VPS
-   - `.env.prod` at `/opt/darkroot/.env.prod`
-
-## Initial Setup (One-Time)
-
-### 1. Prepare VPS
+This is the common case — Synapse/DB don't need restarting for client-only changes.
 
 ```bash
-# SSH to VPS via jumpbox
-ssh lordran-home "ssh vps"
+# 1. Build on lordran-home
+cd /srv/dev/darkroot/client
+npm run build
 
-# Create project directory
-mkdir -p /opt/darkroot
-cd /opt/darkroot
+# 2. Package and rsync to VPS
+TEMP=$(mktemp -d)
+mkdir -p $TEMP/client
+cp /srv/dev/darkroot/docker-compose.prod.yml $TEMP/
+cp -r /srv/dev/darkroot/nginx $TEMP/
+cp -r build $TEMP/client/build
+rsync -avz $TEMP/ vps:/opt/darkroot/
+rm -rf $TEMP
 
-# Create .env.prod with production values
-cat > .env.prod << 'EOF'
-# PostgreSQL
-POSTGRES_PASSWORD=<generate-strong-password>
-POSTGRES_USER=synapse_user
-POSTGRES_DB=synapse
-
-# Synapse
-SYNAPSE_SERVER_NAME=chat.warrenmcgrail.com
-SYNAPSE_REPORT_STATS=no
-REGISTRATION_SHARED_SECRET=<generate-strong-secret>
-
-# Frontend
-PUBLIC_HOMESERVER_URL=https://chat.warrenmcgrail.com
-PUBLIC_APP_NAME=Darkroot Chat
-PUBLIC_APP_VERSION=0.1.0
-PUBLIC_DEFAULT_THEME=darkroot
-EOF
-
-# Generate strong passwords
-openssl rand -base64 32  # For POSTGRES_PASSWORD
-openssl rand -base64 64  # For REGISTRATION_SHARED_SECRET
+# 3. No restart needed — host nginx serves /opt/darkroot/client/build/ directly
+# Verify:
+curl -sf -o /dev/null -w "%{http_code}" https://chat.warrenmcgrail.com
 ```
 
-### 2. Generate Synapse Config
+Or use the script (asks about uncommitted changes):
+```bash
+cd /srv/dev/darkroot && ./scripts/deploy.sh
+```
+
+---
+
+## Check Production Status
 
 ```bash
-# On VPS
-cd /opt/darkroot
+# Container health
+ssh vps "docker compose -f /opt/darkroot/docker-compose.prod.yml ps"
 
-# Generate homeserver.yaml
-docker run -it --rm \
-  -v $(pwd)/synapse:/data \
-  -e SYNAPSE_SERVER_NAME=chat.warrenmcgrail.com \
-  -e SYNAPSE_REPORT_STATS=no \
-  matrixdotorg/synapse:latest generate
+# Synapse health
+ssh vps "curl -sf http://localhost:8008/health"
 
-# Update homeserver.yaml with database config
-# (See synapse/homeserver.yaml in dev for reference)
+# Site reachable
+curl -sf -o /dev/null -w "%{http_code}" https://chat.warrenmcgrail.com
+
+# Synapse logs
+ssh vps "docker logs darkroot-synapse-prod --tail 50"
+
+# Nginx status
+ssh vps "systemctl status nginx"
 ```
 
-### 3. Configure Synapse
+---
 
-Edit `/opt/darkroot/synapse/homeserver.yaml`:
+## Synapse Configuration
 
+Config lives **only on the VPS** (never overwrite from dev):
+```
+/opt/darkroot/synapse/homeserver.yaml   — main config
+/opt/darkroot/synapse/*.signing.key     — server signing key (DO NOT DELETE)
+```
+
+To edit:
+```bash
+ssh vps "nano /opt/darkroot/synapse/homeserver.yaml"
+ssh vps "docker restart darkroot-synapse-prod"
+```
+
+Key settings in `homeserver.yaml`:
+- `server_name: chat.warrenmcgrail.com`
+- `public_baseurl: https://chat.warrenmcgrail.com`
+- `enable_registration: true` + `registration_requires_token: true`
+- `federation_enabled: false` (private server)
+- `max_upload_size: 50M`
+
+---
+
+## Admin Access
+
+### Get admin access token (for raw API calls)
+```bash
+# Query the DB directly
+ssh vps "docker exec darkroot-postgres-prod psql -U synapse_user -d synapse \
+  -c \"SELECT u.name, at.token FROM access_tokens at \
+       JOIN users u ON at.user_id = u.name \
+       WHERE u.admin = true \
+       ORDER BY at.last_validated DESC LIMIT 3;\""
+```
+
+### List all users
+```bash
+TOKEN=<admin-token>
+ssh vps "curl -s -H 'Authorization: Bearer $TOKEN' \
+  http://localhost:8008/_synapse/admin/v2/users?limit=50 | python3 -m json.tool"
+```
+
+### Create registration invite token
+```bash
+TOKEN=<admin-token>
+ssh vps "curl -s -X POST -H 'Authorization: Bearer $TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{\"uses_allowed\": 1}' \
+  http://localhost:8008/_synapse/admin/v1/registration_tokens/new"
+# Use token at: https://chat.warrenmcgrail.com/register?token=<TOKEN>
+```
+
+---
+
+## Restarting Services
+
+```bash
+# All containers
+ssh vps "docker compose -f /opt/darkroot/docker-compose.prod.yml restart"
+
+# Just Synapse
+ssh vps "docker restart darkroot-synapse-prod"
+
+# Host nginx (after config changes)
+ssh vps "sudo nginx -t && sudo systemctl reload nginx"
+```
+
+---
+
+## Database
+
+```bash
+# Connect
+ssh vps "docker exec -it darkroot-postgres-prod psql -U synapse_user -d synapse"
+
+# Size
+ssh vps "docker exec darkroot-postgres-prod psql -U synapse_user -d synapse \
+  -c \"SELECT pg_size_pretty(pg_database_size('synapse'));\""
+
+# Backup
+ssh vps "docker exec darkroot-postgres-prod pg_dump -U synapse_user synapse \
+  > /tmp/synapse-backup-\$(date +%Y%m%d).sql"
+```
+
+---
+
+## SSL / Let's Encrypt
+
+Certificates managed by certbot on the VPS:
+```bash
+# Check expiry
+ssh vps "sudo certbot certificates"
+
+# Renew (certbot runs automatically via cron)
+ssh vps "sudo certbot renew --dry-run"
+```
+
+Nginx cert paths: `/etc/letsencrypt/live/chat.warrenmcgrail.com/`
+
+---
+
+## Logs
+
+```bash
+# Synapse (most useful)
+ssh vps "docker logs darkroot-synapse-prod -f --tail 100"
+
+# Postgres
+ssh vps "docker logs darkroot-postgres-prod --tail 50"
+
+# Nginx access log
+ssh vps "sudo tail -f /var/log/nginx/access.log"
+
+# Nginx error log
+ssh vps "sudo tail -f /var/log/nginx/error.log"
+```
+
+---
+
+## Updating Synapse Version
+
+Edit `docker-compose.prod.yml` on lordran-home:
 ```yaml
-# Database
-database:
-  name: psycopg2
-  args:
-    user: synapse_user
-    password: <your-postgres-password>
-    database: synapse
-    host: postgres
-    port: 5432
-    cp_min: 5
-    cp_max: 10
-
-# Registration
-enable_registration: true
-registration_requires_token: true
-enable_registration_without_verification: true
-
-# Federation (disabled for private server)
-federation_enabled: false
-
-# Max upload size
-max_upload_size: 50M
-
-# Public baseurl
-public_baseurl: https://chat.warrenmcgrail.com
+synapse:
+  image: matrixdotorg/synapse:v1.XXX.0  # update version
 ```
 
-### 4. SSL/TLS Setup (Optional but Recommended)
-
-```bash
-# Install certbot on VPS
-ssh lordran-home "ssh vps 'sudo apt update && sudo apt install certbot'"
-
-# Get SSL certificate (DNS challenge)
-ssh lordran-home "ssh vps 'sudo certbot certonly --manual --preferred-challenges dns -d chat.warrenmcgrail.com'"
-
-# Copy certificates to nginx/ssl/
-ssh lordran-home "ssh vps 'sudo cp /etc/letsencrypt/live/chat.warrenmcgrail.com/fullchain.pem /opt/darkroot/nginx/ssl/ && \
-  sudo cp /etc/letsencrypt/live/chat.warrenmcgrail.com/privkey.pem /opt/darkroot/nginx/ssl/ && \
-  sudo chown -R $(whoami):$(whoami) /opt/darkroot/nginx/ssl/'"
-```
-
-## Deployment Process
-
-### Quick Deploy
-
-From lordran-home:
-
+Then deploy:
 ```bash
 cd /srv/dev/darkroot
-./scripts/deploy.sh
+# Transfer updated compose file
+rsync docker-compose.prod.yml vps:/opt/darkroot/
+
+# Pull new image and restart
+ssh vps "docker compose -f /opt/darkroot/docker-compose.prod.yml pull synapse"
+ssh vps "docker compose -f /opt/darkroot/docker-compose.prod.yml up -d synapse"
 ```
 
-The script will:
-1. ✓ Build frontend locally
-2. ✓ Create deployment package
-3. ✓ Transfer to VPS via jumpbox
-4. ✓ Deploy Docker services
-5. ✓ Run health checks
+> Check [Synapse releases](https://github.com/element-hq/synapse/releases) before updating.
+> Breaking changes are documented in upgrade notes.
 
-### Manual Deploy
+---
 
-If you need more control:
+## Nginx Config
+
+Config on VPS: `/etc/nginx/sites-enabled/chat.warrenmcgrail.com`
+
+The config in the repo (`nginx/darkroot.conf`) is deployed on each rsync
+but the live config on VPS may have diverged. Check before deploying nginx changes:
 
 ```bash
-# 1. Build frontend
-cd /srv/dev/darkroot/client
-npm run build
-
-# 2. Transfer files
-rsync -avz ../docker-compose.prod.yml lordran-home:/tmp/darkroot/
-rsync -avz ../nginx/ lordran-home:/tmp/darkroot/nginx/
-rsync -avz build/ lordran-home:/tmp/darkroot/client-build/
-
-ssh lordran-home "rsync -avz /tmp/darkroot/ vps:/opt/darkroot/"
-
-# 3. Deploy on VPS
-ssh lordran-home "ssh vps 'cd /opt/darkroot && \
-  mv client-build client/build && \
-  docker compose -f docker-compose.prod.yml up -d --build'"
+ssh vps "cat /etc/nginx/sites-enabled/chat.warrenmcgrail.com"
 ```
 
-## Post-Deployment
-
-### Create Admin User
-
-```bash
-ssh lordran-home "ssh vps 'docker exec -it darkroot-synapse-prod register_new_matrix_user \
-  -c /data/homeserver.yaml \
-  http://localhost:8008 \
-  -u admin \
-  -p <strong-password> \
-  --admin'"
-```
-
-### View Logs
-
-```bash
-# All services
-ssh lordran-home "ssh vps 'docker compose -f /opt/darkroot/docker-compose.prod.yml logs -f'"
-
-# Specific service
-ssh lordran-home "ssh vps 'docker logs darkroot-synapse-prod -f'"
-ssh lordran-home "ssh vps 'docker logs darkroot-nginx-prod -f'"
-```
-
-### Health Checks
-
-```bash
-# Synapse API
-curl http://chat.warrenmcgrail.com/_matrix/client/versions
-
-# Nginx
-curl http://chat.warrenmcgrail.com/health
-```
-
-## Updating
-
-### Frontend Changes Only
-
-```bash
-cd /srv/dev/darkroot/client
-npm run build
-
-rsync -avz build/ lordran-home:/tmp/darkroot-build/
-ssh lordran-home "scp -r /tmp/darkroot-build/* vps:/opt/darkroot/client/build/"
-
-# Reload nginx (picks up new files via volume mount)
-ssh lordran-home "ssh vps 'docker compose -f /opt/darkroot/docker-compose.prod.yml restart nginx'"
-```
-
-### Backend Changes
-
-```bash
-# Run full deployment
-./scripts/deploy.sh
-```
+---
 
 ## Rollback
 
 ```bash
-# Stop current deployment
-ssh lordran-home "ssh vps 'docker compose -f /opt/darkroot/docker-compose.prod.yml down'"
-
-# Restore from backup (if you have one)
-# Or redeploy from known-good commit:
 cd /srv/dev/darkroot
-git checkout <good-commit>
-./scripts/deploy.sh
+git log --oneline -10          # find a good commit
+git checkout <hash> -- client/ # restore client files
+cd client && npm run build     # rebuild
+# then deploy as normal
+git checkout main              # restore branch
 ```
-
-## Troubleshooting
-
-### Synapse won't start
-
-```bash
-# Check logs
-ssh lordran-home "ssh vps 'docker logs darkroot-synapse-prod'"
-
-# Common issues:
-# - Database password mismatch
-# - homeserver.yaml syntax error
-# - Database not ready (wait for healthcheck)
-```
-
-### Can't connect to homeserver
-
-```bash
-# Check if Synapse is running
-ssh lordran-home "ssh vps 'curl http://localhost:8008/health'"
-
-# Check nginx proxy
-ssh lordran-home "ssh vps 'curl http://localhost/_matrix/client/versions'"
-
-# Check from outside
-curl http://chat.warrenmcgrail.com/_matrix/client/versions
-```
-
-### SSL Issues
-
-```bash
-# Verify certificates exist
-ssh lordran-home "ssh vps 'ls -la /opt/darkroot/nginx/ssl/'"
-
-# Check nginx config
-ssh lordran-home "ssh vps 'docker exec darkroot-nginx-prod nginx -t'"
-
-# Renew certificates
-ssh lordran-home "ssh vps 'sudo certbot renew'"
-```
-
-## Monitoring
-
-### Docker Stats
-
-```bash
-ssh lordran-home "ssh vps 'docker stats'"
-```
-
-### Disk Usage
-
-```bash
-ssh lordran-home "ssh vps 'docker system df'"
-
-# Clean up old images/volumes
-ssh lordran-home "ssh vps 'docker system prune -a'"
-```
-
-### Database Size
-
-```bash
-ssh lordran-home "ssh vps 'docker exec darkroot-postgres-prod psql -U synapse_user -d synapse -c \"SELECT pg_size_pretty(pg_database_size(current_database()));\"'"
-```
-
-## Backup & Restore
-
-### Backup Database
-
-```bash
-ssh lordran-home "ssh vps 'docker exec darkroot-postgres-prod pg_dump -U synapse_user synapse > /tmp/synapse-backup-$(date +%Y%m%d).sql'"
-```
-
-### Restore Database
-
-```bash
-ssh lordran-home "ssh vps 'docker exec -i darkroot-postgres-prod psql -U synapse_user synapse < /path/to/backup.sql'"
-```
-
-## Production Checklist
-
-Before going live:
-
-- [ ] Strong passwords in .env.prod
-- [ ] SSL/TLS certificates configured
-- [ ] DNS pointing to VPS
-- [ ] Firewall rules configured (UFW)
-- [ ] Admin user created
-- [ ] Health checks passing
-- [ ] Backups configured
-- [ ] Monitoring set up
-- [ ] Test login from external network
-- [ ] Test sending messages
-- [ ] Test creating rooms
-
-## Performance Tuning
-
-### PostgreSQL
-
-Edit `docker-compose.prod.yml` postgres service:
-
-```yaml
-command: >
-  postgres
-  -c shared_buffers=256MB
-  -c effective_cache_size=1GB
-  -c maintenance_work_mem=64MB
-  -c checkpoint_completion_target=0.9
-```
-
-### Nginx Caching
-
-Already configured in `nginx/darkroot.conf` with:
-- Static asset caching (1 year)
-- Gzip compression
-- Rate limiting
-
-## Security
-
-### Firewall (UFW)
-
-```bash
-ssh lordran-home "ssh vps 'sudo ufw allow 80/tcp'"
-ssh lordran-home "ssh vps 'sudo ufw allow 443/tcp'"
-ssh lordran-home "ssh vps 'sudo ufw enable'"
-```
-
-### Auto-Updates
-
-```bash
-ssh lordran-home "ssh vps 'sudo apt install unattended-upgrades'"
-```
-
-### Regular Maintenance
-
-- Update Docker images monthly
-- Renew SSL certificates (certbot auto-renews)
-- Review logs for suspicious activity
-- Backup database weekly
-- Clean up old Docker volumes
 
 ---
 
-**Need Help?** Check logs first, then consult:
-- Matrix Synapse docs: https://matrix-org.github.io/synapse/
-- Docker docs: https://docs.docker.com/
-- Nginx docs: https://nginx.org/en/docs/
+## Disk Usage
+
+```bash
+ssh vps "df -h /opt"
+ssh vps "docker system df"
+
+# Clean unused images
+ssh vps "docker image prune -f"
+```

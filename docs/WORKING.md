@@ -1,279 +1,217 @@
-# Darkroot - Development Guide
+# Darkroot Chat — Development Guide
 
-**Status**: Phase 4 Complete ✅ - Production deployed! 🎉
-**Live**: `http://chat.warrenmcgrail.com` (pending DNS A record)
-**Dev**: `http://192.168.1.161:5175`
+**Status**: Active / Production ✅
+**Live**: `https://chat.warrenmcgrail.com` (SSL, fully deployed)
+**Dev server**: `http://192.168.1.161:5175`
+**Last major update**: February 2026
+
+---
 
 ## Current Features
 
-✅ **Authentication & Sessions**
+### Authentication & Sessions
 - Login with username/password
-- Session persistence (survives page refresh)
-- Logout functionality
+- Session persistence via localStorage (survives page refresh)
+- Auto-restore session on load; redirect to /login if none found
+- Logout clears credentials and stops sync
+- Service worker auto-reloads page on new deploy (controllerchange event)
 
-✅ **Room Navigation**
-- Room list sidebar with real-time updates
-- Room avatars (first letter of name)
-- Last message preview
-- Unread message badges
-- Click to select room
+### Room Navigation (Left Sidebar)
+- Path-notation header: `darkroot.chat.rooms`
+- Room list with DS SVG icon, name, last message preview, member count
+- Unread message badge (clears when room is viewed via read receipts)
+- Invite badge + accept/decline flow for pending invites
+- Discoverable public rooms section (rooms not yet joined)
+- Create room modal (name, topic, public/private visibility)
+- Room settings modal (name, topic, icon picker, visibility, members, danger zone)
+- `darkroot.chat.users` panel with online/offline presence dots
+  - User list sourced from Synapse Admin API (authoritative, matches admin panel)
 
-✅ **Messaging**
-- Send text messages (Enter to send, Shift+Enter for new line)
-- View message history
-- Real-time message sync
-- Markdown support (bold, italic, code blocks, links)
-- Auto-scroll to latest message
-- Relative timestamps ("Just now", "5m ago", "2h ago")
-- Message differentiation (own messages on right, others on left)
-- Image/file attachment support (backend ready)
-- **NEW:** Typing indicators ("Username is typing...")
-- **NEW:** User presence (online/offline dots on avatars)
-- **NEW:** Message reactions (Darkroot-themed: Praise, Humanity, Estus, Bonfire)
+### Messaging
+- Dense IRC-log layout — full width, no bubble alignment flip for own messages
+- Own messages: subtle 2px left-border green tint (no background bubble)
+- Grouped messages collapse tightly (same sender within 5 min)
+- Inline timestamps (hidden, revealed on row hover)
+- Edit own messages — hover toolbar → pencil → inline textarea → Enter/Esc
+  - `(edited)` indicator shown on edited messages
+  - Sends `m.replace` relation; SDK auto-applies to original event
+- Delete own messages — hover toolbar → trash → calls redactEvent()
+  - Redaction listener calls fetchRoomMessages() so filter removes it immediately
+- Markdown rendering: bold, italic, code blocks, blockquotes, links (via `marked`)
+- Image and file message display
+- Read receipts sent automatically; unread count clears live
 
-✅ **Room Management** (Phase 4 - NEW!)
-- Create new rooms with + button
-- Beautiful modal dialog for room creation
-- Set room name and topic
-- Automatic room selection after creation
-- Real-time room list updates
+### Message Reactions
+- Darkroot-themed: 🗡️ Praise the Sun, 🤲 Humanity, 🧪 Estus, 🔥 Kindle Bonfire
+- Hover "+" button to open picker; click to toggle (add/remove)
+- Reaction counts shown below messages; hover for who reacted tooltip
 
-✅ **Production Deployment** (Phase 4 - NEW!)
-- Environment-based configuration (dev/prod)
-- Production Docker Compose with Nginx
-- One-command deployment script
-- SSL/TLS ready (Let's Encrypt)
-- Volume-mounted frontend (no rebuild for updates!)
-- Health checks and monitoring
+### Link Sidebar
+- Service links (YouTube, Instagram, Twitter/X, etc.) extracted from messages
+- Right-hand panel toggle (link icon in header)
+- Card shows thumbnail, title, URL, metadata (fetched on demand)
+- X/Twitter links show a warning modal before sending
 
-## Prerequisites
+### Room Header
+- DS SVG icon (themed per room name via `roomIcons.ts`)
+- Room name (display font)
+- Room topic/description (italic, muted; hint to set one if empty)
+- Action buttons: stats (bar chart), room settings (gear), link panel toggle
 
-- Docker & Docker Compose
-- Node.js 20+
-- Git
+### Stats Panel (`darkroot.chat.rooms.stats`)
+- Opens as right-hand drawer (overlays chat)
+- Paginates full room history via `paginateEventTimeline()` (100 events/page)
+- Live-updating stats while loading; refresh button
+- Overview: total messages, total words, avg words/msg, unique users
+- Top voices: horizontal bar chart per user with message count + avg word length
+- Last 14 days: column activity chart
+- Hourly heatmap: 24-cell grid, opacity ∝ activity; labels at 6h intervals
+- Longest message: quoted preview with word count
+
+### Admin Panel (`darkroot.chat.admin`)
+- User list (from Synapse Admin API) with active/deactivated status
+- Deactivate users, reset passwords
+- Registration token management: create, list, delete
+- Generates shareable invite links: `https://chat.warrenmcgrail.com/register?token=...`
+
+### User Settings (`darkroot.chat.user.settings`)
+- Display name change
+- Password change
+- Avatar upload
+- Path: `/settings`
+
+### PWA
+- Installable (manifest, icons)
+- Offline shell (Workbox precache)
+- Auto-update: service worker takes control → `controllerchange` → page reloads
+
+---
 
 ## Development Setup
 
-### 1. Start Backend Services
-
+### 1. Start backend
 ```bash
 cd /srv/dev/darkroot
 docker compose -f docker-compose.dev.yml up -d
+# PostgreSQL → localhost:5433
+# Redis → localhost:6379
+# Synapse → localhost:8008
 ```
 
-This starts:
-- PostgreSQL (port 5433)
-- Redis
-- Matrix Synapse (port 8008)
-
-### 2. Install Client Dependencies
-
+### 2. Install dependencies
 ```bash
-cd client
-npm install
+cd client && npm install
 ```
 
-### 3. Start Development Server
-
+### 3. Start dev server
 ```bash
-# Start with network binding for LAN/Tailscale access
 npm run dev -- --host 0.0.0.0 --port 5175
 ```
 
-Access at:
-- **Local**: http://localhost:5175
-- **LAN**: http://192.168.1.161:5175
-- **Tailscale**: http://100.119.125.74:5175
-
 ### 4. Login
+- **Username**: `darkroot_admin`
+- **Homeserver**: `http://localhost:8008`
+- **Password**: see `synapse/homeserver.yaml` or reset via Admin API
 
-**Admin credentials:**
-- Username: `admin`
-- Password: `darkroot_admin_2026`
-- Homeserver: `http://localhost:8008`
+---
 
-## Development Workflow
+## Key Architecture
 
-### Making Changes
+### Stores (`lib/stores/matrix.ts`)
+| Store | Type | Description |
+|-------|------|-------------|
+| `matrixClient` | `MatrixClient \| null` | SDK client instance |
+| `rooms` | `Room[]` | Joined rooms, updated on sync |
+| `messages` | `Message[]` | Current room messages |
+| `currentRoomId` | `string \| null` | Selected room |
+| `userPresence` | `Record<string, string>` | userId → 'online'\|'offline' |
+| `typingUsers` | `string[]` | UserIDs currently typing |
+| `isLoggedIn` | `boolean` | Auth state |
+| `syncState` | `string` | 'PREPARED'\|'SYNCING'\|'ERROR' |
 
-1. Edit files in `client/src/`
-2. Changes hot-reload automatically
-3. Test in browser
+### Matrix module responsibilities
+| File | Responsibility |
+|------|---------------|
+| `client.ts` | createClient (with `pendingEventOrdering: Detached`), login, restore, logout |
+| `rooms.ts` | updateRoomList(), listeners for Timeline/Receipt/Redaction |
+| `messages.ts` | fetchRoomMessages() + read receipt, send/edit/delete, setupMessageListeners() |
+| `admin.ts` | listUsers(), deactivateUser(), token CRUD — all via Synapse Admin API |
+| `stats.ts` | loadFullHistory() pagination, computeStats() aggregation |
+| `reactions.ts` | addReaction(), removeReaction(), getMessageReactions() |
+| `typing.ts` | handleTyping(), stopTyping() |
+| `presence.ts` | setupPresenceListeners() |
 
-### Testing Matrix API
+### Known gotchas
+- **`pendingEventOrdering: Detached`** must be set in `createClient()` — without it, `redactEvent()` throws `"Cannot call getPendingEvents with pendingEventOrdering == chronological"`
+- **Read receipts**: never send for local echo events (IDs starting with `~`) — server returns 400
+- **User list**: use `listUsers()` from `admin.ts`, NOT `client.getUsers()` (SDK cache is unreliable and uses different field names)
+- **Svelte reactive statements**: `$: knownUsers = $matrixClient ? ...` only re-runs when `$matrixClient` changes. Add a dependency on `$rooms` to re-trigger after sync
+- **Global CSS vs Svelte scoped**: Svelte only overrides explicitly declared properties. Always declare `flex-direction` explicitly when using flexbox
 
+---
+
+## Deploy
+
+### Quick (most common — frontend changes only)
 ```bash
-# Check API is running
-curl http://localhost:8008/_matrix/client/versions
+cd /srv/dev/darkroot/client && npm run build
 
-# View Synapse logs
-docker logs darkroot-synapse-dev -f
+TEMP=$(mktemp -d) && mkdir -p $TEMP/client
+cp ../docker-compose.prod.yml $TEMP/
+cp -r ../nginx $TEMP/
+cp -r build $TEMP/client/build
+rsync -avz $TEMP/ vps:/opt/darkroot/ && rm -rf $TEMP
+# Host nginx serves files immediately — no restart needed
 ```
 
-### Database Access
-
+### Via script (interactive)
 ```bash
-# Connect to PostgreSQL
-docker exec -it darkroot-postgres-dev psql -U synapse_user -d synapse
+cd /srv/dev/darkroot && ./scripts/deploy.sh
+# Prompts if uncommitted changes; builds + deploys
 ```
 
-### Stop Services
-
+### Verify
 ```bash
-docker compose -f docker-compose.dev.yml down
+curl -sf -o /dev/null -w "%{http_code}" https://chat.warrenmcgrail.com
+ssh vps "docker compose -f /opt/darkroot/docker-compose.prod.yml ps"
 ```
 
-## Common Tasks
-
-### Create New User (Registration Token)
-
-```bash
-# Generate token via Synapse API (requires admin)
-curl -X POST http://localhost:8008/_synapse/admin/v1/registration_tokens/new \
-  -H "Authorization: Bearer <admin_token>" \
-  -d '{"uses_allowed": 5}'
-```
-
-### Reset Development Environment
-
-```bash
-# Warning: Deletes all data
-docker compose -f docker-compose.dev.yml down -v
-docker compose -f docker-compose.dev.yml up -d
-```
+---
 
 ## Troubleshooting
 
 ### Synapse won't start
-- Check logs: `docker logs darkroot-synapse-dev`
-- Verify database password in `synapse/homeserver.yaml` matches `.env`
-
-### Can't connect from client
-- Ensure Synapse is running: `curl http://localhost:8008/_matrix/client/versions`
-- Check CORS settings (disabled in homeserver.yaml for dev)
-
-### File ownership issues
-- Fix: `sudo chown -R wmcgrail:staff /srv/dev/darkroot/`
-
-## Testing Messaging (Phase 3)
-
-### Send a Message
-
-1. Login at http://192.168.1.161:5175
-2. Select a room from the sidebar
-3. Type in the message box at the bottom
-4. Press **Enter** to send (Shift+Enter for new line)
-5. Message appears instantly in the chat!
-
-### Test Markdown
-
-Try these in the message box:
-```
-**Bold text**
-_Italic text_
-`Inline code`
-[Link](https://example.com)
-
-```code block```
+```bash
+ssh vps "docker logs darkroot-synapse-prod --tail 50"
 ```
 
-### View Message History
+### Messages not appearing
+- Check browser console for SDK errors
+- Verify `currentRoomId` matches the room
+- Try `fetchRoomMessages()` manually in console
 
-- Messages load automatically when you select a room
-- Scroll up to see older messages
-- Auto-scrolls to bottom when new messages arrive
-- Stay scrolled up to prevent auto-scroll
+### User list empty in sidebar
+- The reactive statement needs `$rooms` as a dependency to fire after sync
+- If using `client.getUsers()` — switch to `listUsers()` from `admin.ts`
 
-### Real-time Sync
+### Delete not working
+- Confirm `pendingEventOrdering: Detached` is set in `createClient()`
+- Check browser console for "getPendingEvents" error
 
-- Open the app in two browser windows
-- Send a message in one window
-- Watch it appear instantly in the other!
-
-## Architecture
-
-### Frontend (`/client`)
-- **SvelteKit** - Web framework with TypeScript
-- **Matrix JS SDK** - Matrix client library
-- **Lordran UI** - Design system with Darkroot variant
-- **marked** - Markdown rendering
-
-### Backend Services (Docker)
-- **Matrix Synapse** - Homeserver (Python)
-- **PostgreSQL 16** - Database
-- **Redis 7** - Caching and presence
-
-### Key Files
-```
-client/src/
-├── lib/
-│   ├── matrix/
-│   │   ├── client.ts          # Client wrapper, auth, session
-│   │   ├── rooms.ts           # Room management, listeners
-│   │   └── messages.ts        # Message sending/receiving (Phase 3)
-│   ├── stores/
-│   │   └── matrix.ts          # Reactive Svelte stores
-│   └── components/
-│       ├── RoomList.svelte    # Sidebar with rooms
-│       ├── RoomView.svelte    # Main chat view
-│       └── MessageList.svelte # Message display (Phase 3)
-├── routes/
-│   ├── +layout.svelte         # Root layout, session restore
-│   ├── +page.svelte           # Main app (room list + view)
-│   └── login/
-│       └── +page.svelte       # Login page
-└── app.css                    # Global styles, Lordran UI imports
+### Build fails
+```bash
+cd /srv/dev/darkroot/client
+npm ci && npm run build
 ```
 
-## Invite Link Flow
+---
 
-**How token-based invites work (no email system needed):**
+## Roadmap / Ideas
 
-1. Admin opens Admin Panel (gear icon in top bar)
-2. Clicks "Generate Invite Link" (creates token: 5 uses, 7-day expiry)
-3. Link auto-copied to clipboard: `https://chat.warrenmcgrail.com/register?token=ABC123`
-4. Share link via text, DM, etc.
-5. New user clicks link → sees "Welcome to the Forest" page
-6. User picks username + password → account created → auto-login → chat
-
-**Two registration modes:**
-- **Invite link** (`/register?token=...`): Token pre-filled, hidden from UI, welcoming messaging
-- **Manual token** (`/register`): User must paste token into a visible field
-
-**Key files:**
-- `lib/matrix/admin.ts` — Token CRUD via Synapse Admin API
-- `lib/components/AdminPanel.svelte` — Token management UI
-- `routes/register/+page.svelte` — Registration page (both modes)
-- `routes/+layout.svelte` — Auth guard with public route allowlist
-
-## Recent Additions (Feb 13, 2026)
-
-✅ **Better Timestamps**
-- Relative time formatting ("Just now", "5m ago", "Yesterday")
-- Hover to see full timestamp
-- Auto-updates every 30 seconds
-
-✅ **Typing Indicators**
-- Shows "Username is typing..." below chat
-- Animated dots with forest green theme
-- Handles multiple simultaneous typers
-
-✅ **User Presence**
-- Green dot = Online, Gray dot = Offline
-- Shows on message avatars
-- Real-time updates via Matrix presence events
-
-✅ **Message Reactions** (Text-Based, No Emojis!)
-- Darkroot-themed reactions: "Praise", "Humanity", "Estus", "Bonfire"
-- Hover messages to see "+" button
-- Click reactions to toggle (add/remove)
-- Shows reaction count and who reacted (hover tooltip)
-
-## Next Steps
-
-**Remaining polish:**
-- [ ] User settings and profile editing
-- [ ] Desktop notifications
-- [ ] Backup strategy
-- [ ] Message editing/deletion
-- [ ] Read receipts
+- [ ] Desktop/push notifications
+- [ ] Voice/video calls (Matrix VOIP)
+- [ ] Message search
+- [ ] More themes
+- [ ] Pinned messages in room header
+- [ ] Mobile app (Capacitor?)
+- [ ] NAS backup of Synapse DB (daily pg_dump)
