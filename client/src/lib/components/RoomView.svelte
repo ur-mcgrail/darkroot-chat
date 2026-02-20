@@ -5,6 +5,7 @@
 	import { fetchRoomMessages, sendMessage } from '$lib/matrix/messages';
 	import { handleTyping, stopTyping } from '$lib/matrix/typing';
 	import { getRoomIcon } from '$lib/utils/roomIcons';
+	import { fetchMediaUrl } from '$lib/utils/media';
 	import MessageList from './MessageList.svelte';
 	import LinkSidebar from './LinkSidebar.svelte';
 	import RoomSettingsModal from './RoomSettingsModal.svelte';
@@ -57,6 +58,22 @@
 
 	$: roomName = $currentRoom ? getRoomName($currentRoom) : '';
 	$: roomTopic = $currentRoom?.currentState.getStateEvents('m.room.topic', '')?.getContent()?.topic || '';
+
+	// Room avatar for header — fetch when room changes
+	let headerAvatarUrl: string | null = null;
+	let _headerAvatarKey = '';
+	$: {
+		const mxcUrl = $currentRoom?.getMxcAvatarUrl() || '';
+		const key = `${$currentRoom?.roomId}:${mxcUrl}`;
+		if (key !== _headerAvatarKey && $matrixClient) {
+			_headerAvatarKey = key;
+			if (mxcUrl) {
+				fetchMediaUrl($matrixClient, mxcUrl, 56, 56, 'crop').then(url => { headerAvatarUrl = url; });
+			} else {
+				headerAvatarUrl = null;
+			}
+		}
+	}
 
 	// Load messages when room changes
 	$: if ($currentRoomId) {
@@ -185,7 +202,11 @@
 		<div class="room-header">
 			<div class="room-header__info">
 				<div class="room-header__icon" aria-hidden="true">
-					{@html getRoomIcon(roomName)}
+					{#if headerAvatarUrl}
+						<img class="room-header__icon-img" src={headerAvatarUrl} alt="" />
+					{:else}
+						{@html getRoomIcon(roomName)}
+					{/if}
 				</div>
 				<div class="room-header__details">
 					<h2 class="room-header__name">{roomName}</h2>
@@ -437,6 +458,14 @@
 		width: 28px;
 		height: 28px;
 		display: block;
+	}
+
+	.room-header__icon-img {
+		width: 28px;
+		height: 28px;
+		border-radius: var(--radius-sm);
+		display: block;
+		object-fit: cover;
 	}
 
 	.room-header__details {

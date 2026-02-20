@@ -59,6 +59,7 @@ cd ..
 echo -e "${BLUE}📁 Creating deployment package...${NC}"
 TEMP_DIR="/tmp/darkroot-deploy-$(date +%s)"
 mkdir -p "$TEMP_DIR/client"
+chmod 755 "$TEMP_DIR"  # rsync applies source dir permissions to /opt/darkroot — must be world-executable
 
 cp docker-compose.prod.yml "$TEMP_DIR/"
 cp -r nginx "$TEMP_DIR/"

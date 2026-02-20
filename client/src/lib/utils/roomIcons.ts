@@ -4,7 +4,6 @@
  * and work with the Darkroot theme tokens automatically.
  *
  * Icon set:
- *   bonfire — planted sword with flames (name-matched to rooms containing "bonfire")
  *   estus   — Estus Flask silhouette
  *   ring    — covenant ring with gem setting
  *   fog     — fog gate / mist door frame
@@ -12,26 +11,12 @@
  *   skull   — undead hollow skull
  *
  * Assignment:
- *   • Rooms whose name matches /bonfire/i → bonfire icon
- *   • All other rooms → deterministic hash pick from the full set
+ *   • All rooms → deterministic hash pick from the set
  *     (consistent across sessions, unique per room)
+ *   • If a Matrix room avatar is set, the avatar takes priority in the UI
  */
 
 const ICONS = {
-
-	// ── Bonfire ─────────────────────────────────────────────────────────────
-	// Greatsword planted blade-down; side flame wisps behind; center tall flame;
-	// crossguard and pommel on top. Drawn back→front: base, flames, sword.
-	bonfire: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-  <ellipse cx="12" cy="21" rx="5" ry="1.5"/>
-  <path d="M9.5 17 C8 14.5 7.5 11 9.5 8 C10 10.5 9.5 13 10.5 15.5Z" opacity="0.55"/>
-  <path d="M14.5 17 C16 14.5 16.5 11 14.5 8 C14 10.5 14.5 13 13.5 15.5Z" opacity="0.55"/>
-  <path d="M12 17 C10.5 14 10 10 12 7 C14 10 13.5 14 12 17Z"/>
-  <path d="M11.5 10.5 L12.5 10.5 L12 21Z"/>
-  <rect x="7.5" y="9" width="9" height="1.5" rx="0.75"/>
-  <rect x="11.3" y="5.5" width="1.4" height="3.5" rx="0.5"/>
-  <circle cx="12" cy="4.5" r="1.5"/>
-</svg>`,
 
 	// ── Estus Flask ─────────────────────────────────────────────────────────
 	// Stopper on top, narrow neck widening at the shoulder into a round body.
@@ -78,11 +63,6 @@ const ICONS = {
 type IconKey = keyof typeof ICONS;
 const ICON_KEYS = Object.keys(ICONS) as IconKey[];
 
-/** Rooms whose name matches a pattern get a specific icon */
-const NAME_MAP: Array<{ pattern: RegExp; key: IconKey }> = [
-	{ pattern: /bonfire/i, key: 'bonfire' },
-];
-
 /** djb2-style hash — deterministic, stable across sessions */
 function hashName(s: string): number {
 	let h = 5381;
@@ -92,14 +72,7 @@ function hashName(s: string): number {
 	return h;
 }
 
-/**
- * Returns the SVG string for a room's icon.
- * Named rooms (e.g. "Bonfire Chat") get a specific icon;
- * all others get a consistent icon chosen by hashing the room name.
- */
+/** Returns a consistent SVG icon for a room, chosen by hashing the room name. */
 export function getRoomIcon(roomName: string): string {
-	for (const { pattern, key } of NAME_MAP) {
-		if (pattern.test(roomName)) return ICONS[key];
-	}
 	return ICONS[ICON_KEYS[hashName(roomName) % ICON_KEYS.length]];
 }
