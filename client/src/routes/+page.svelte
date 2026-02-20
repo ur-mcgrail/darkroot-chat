@@ -195,7 +195,7 @@
 			<div class="panel panel--rooms"
 				class:panel--hidden={isMobile && mobileTab !== 'rooms'}
 				class:panel--chat-active={isMobile && mobileTab === 'chat' && $currentRoomId}>
-				<RoomList />
+				<RoomList onRoomClick={isMobile ? () => setTab('chat') : null} />
 			</div>
 
 			<!-- Chat panel -->
@@ -315,6 +315,7 @@
 		display: flex;
 		flex-direction: column;
 		height: 100vh;
+		height: 100dvh; /* dynamic viewport height — accounts for mobile browser chrome */
 		background: var(--bg-base);
 	}
 

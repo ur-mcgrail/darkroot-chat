@@ -88,8 +88,13 @@
 		}
 	}
 
+	// Optional callback — fires on every room tap, including re-selecting the current room.
+	// Used by the mobile layout to switch back to the chat tab.
+	export let onRoomClick: (() => void) | null = null;
+
 	function handleRoomClick(roomId: string) {
 		setCurrentRoom(roomId);
+		onRoomClick?.();
 	}
 
 	function handleCreateRoom() {
