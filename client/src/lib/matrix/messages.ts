@@ -82,35 +82,37 @@ export async function sendMessage(roomId: string, text: string): Promise<void> {
 	}
 }
 
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
+const ALLOWED_FILE_TYPES  = new Set(['application/pdf', 'text/plain', 'application/zip',
+	'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;  // 10 MB
+const MAX_FILE_SIZE  = 50 * 1024 * 1024;  // 50 MB (matches nginx client_max_body_size)
+
+function sanitizeFilename(name: string): string {
+	return name.replace(/[^a-zA-Z0-9._\- ]/g, '_').substring(0, 255);
+}
+
 /**
  * Send an image message to a room
  */
 export async function sendImage(roomId: string, file: File): Promise<void> {
 	const client = get(matrixClient);
-	if (!client) {
-		throw new Error('Matrix client not initialized');
+	if (!client) throw new Error('Matrix client not initialized');
+
+	if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+		throw new Error(`Unsupported image type: ${file.type}`);
+	}
+	if (file.size > MAX_IMAGE_SIZE) {
+		throw new Error(`Image too large (max 10 MB, got ${(file.size / 1024 / 1024).toFixed(1)} MB)`);
 	}
 
-	try {
-		// Upload the file to the homeserver
-		const uploadResponse = await client.uploadContent(file);
-
-		// Send image message
-		await client.sendMessage(roomId, {
-			msgtype: 'm.image',
-			body: file.name,
-			url: uploadResponse.content_uri,
-			info: {
-				mimetype: file.type,
-				size: file.size,
-			}
-		});
-
-		console.log('Image sent:', file.name);
-	} catch (error) {
-		console.error('Failed to send image:', error);
-		throw error;
-	}
+	const uploadResponse = await client.uploadContent(file);
+	await client.sendMessage(roomId, {
+		msgtype: 'm.image',
+		body: sanitizeFilename(file.name),
+		url: uploadResponse.content_uri,
+		info: { mimetype: file.type, size: file.size },
+	});
 }
 
 /**
@@ -118,30 +120,22 @@ export async function sendImage(roomId: string, file: File): Promise<void> {
  */
 export async function sendFile(roomId: string, file: File): Promise<void> {
 	const client = get(matrixClient);
-	if (!client) {
-		throw new Error('Matrix client not initialized');
+	if (!client) throw new Error('Matrix client not initialized');
+
+	if (!ALLOWED_FILE_TYPES.has(file.type)) {
+		throw new Error(`Unsupported file type: ${file.type}`);
+	}
+	if (file.size > MAX_FILE_SIZE) {
+		throw new Error(`File too large (max 50 MB, got ${(file.size / 1024 / 1024).toFixed(1)} MB)`);
 	}
 
-	try {
-		// Upload the file
-		const uploadResponse = await client.uploadContent(file);
-
-		// Send file message
-		await client.sendMessage(roomId, {
-			msgtype: 'm.file',
-			body: file.name,
-			url: uploadResponse.content_uri,
-			info: {
-				mimetype: file.type,
-				size: file.size,
-			}
-		});
-
-		console.log('File sent:', file.name);
-	} catch (error) {
-		console.error('Failed to send file:', error);
-		throw error;
-	}
+	const uploadResponse = await client.uploadContent(file);
+	await client.sendMessage(roomId, {
+		msgtype: 'm.file',
+		body: sanitizeFilename(file.name),
+		url: uploadResponse.content_uri,
+		info: { mimetype: file.type, size: file.size },
+	});
 }
 
 /**

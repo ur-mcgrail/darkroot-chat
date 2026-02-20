@@ -2,6 +2,7 @@
 	import { onMount, afterUpdate } from 'svelte';
 	import { messages, matrixClient, userPresence, currentRoomId, highlightedLink } from '$lib/stores/matrix';
 	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 	import { getMessageBody, getMessageType, isOwnMessage, editMessage, deleteMessage } from '$lib/matrix/messages';
 	import { hasServiceLink, extractAllServiceLinks, URL_REGEX } from '$lib/utils/links';
 	import { fetchAvatarUrl, fetchMediaUrl } from '$lib/utils/media';
@@ -27,6 +28,15 @@
 		breaks: true,
 		gfm: true,
 	});
+
+	/** Parse markdown then strip dangerous HTML (XSS prevention). */
+	function safeMarkdown(body: string): string {
+		return DOMPurify.sanitize(marked.parse(body) as string, {
+			ALLOWED_TAGS: ['p','br','b','i','em','strong','code','pre','blockquote','ul','ol','li','a','del','s'],
+			ALLOWED_ATTR: ['href','target','rel'],
+			ALLOW_DATA_ATTR: false,
+		});
+	}
 
 	afterUpdate(() => {
 		if (shouldAutoScroll && messageContainer) {
@@ -336,7 +346,7 @@
 							{#if messageType === 'm.text'}
 								{#if isLink}
 									{@const links = extractAllServiceLinks(body)}
-									<div class="msg-card__text">{@html renderBodyWithIconLinks(body, links)}</div>
+									<div class="msg-card__text">{@html DOMPurify.sanitize(renderBodyWithIconLinks(body, links), { ALLOWED_TAGS: ['p','br','b','i','em','strong','code','pre','blockquote','ul','ol','li','a','del','s','svg','path','rect','circle','ellipse'], ALLOWED_ATTR: ['href','target','rel','class','title','viewBox','fill','stroke','stroke-width','stroke-linecap','stroke-linejoin','xmlns','width','height','d','cx','cy','r','rx','ry','x','y','x1','y1','x2','y2'], ALLOW_DATA_ATTR: false })}</div>
 									<button
 										class="link-feed-badge"
 										on:click={() => highlightedLink.set({ id: message.id, ts: Date.now(), from: 'chat' })}
@@ -360,7 +370,7 @@
 									{/each}
 								{:else}
 									<div class="msg-card__text">
-										{@html marked.parse(body)}
+										{@html safeMarkdown(body)}
 										{#if isEdited(message.event)}<span class="msg-edited">(edited)</span>{/if}
 									</div>
 								{/if}

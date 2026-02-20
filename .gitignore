@@ -35,7 +35,7 @@ Thumbs.db
 *.swo
 *~
 
-# Synapse data (generated)
+# Synapse data (generated) and secrets
 synapse/data/
 synapse/*.db
 synapse/*.db-shm
@@ -45,6 +45,8 @@ synapse/*.log.*
 synapse/signing.key
 synapse/homeserver.db
 synapse/media_store/
+# homeserver.yaml contains secrets — use homeserver.yaml.example as the template
+synapse/homeserver.yaml
 
 # Docker volumes
 postgres_data/

@@ -38,7 +38,7 @@ max_upload_size: 50M
 # Registration
 enable_registration: true
 registration_requires_token: true
-registration_shared_secret: "Qe2@MS1^q1y;9G.8_uV3;hGyc*ZcU:V#DX-X5iSs9LJWVzRwrP"
+registration_shared_secret: "CHANGE_ME_generate_with_openssl_rand_hex_32"
 
 # Federation (DISABLED for private server)
 federation_enabled: false
@@ -48,8 +48,8 @@ trusted_key_servers: []
 
 # Security
 report_stats: false
-macaroon_secret_key: "6bdlRde^=A8PhZ-bStCnx;Iw6ZZyN_@bM^eCbl9epqE.V8ccdh"
-form_secret: "3,8PW-civF@DO#Wn:&vtiq#3xid.ivm15,&kpEzE9CF4AS=V4z"
+macaroon_secret_key: "CHANGE_ME_generate_with_openssl_rand_hex_32"
+form_secret: "CHANGE_ME_generate_with_openssl_rand_hex_32"
 signing_key_path: "/data/darkroot.local.signing.key"
 
 # Performance
